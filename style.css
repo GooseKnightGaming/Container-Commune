@@ -289,3 +289,30 @@ input.plain.invalid { border-color: var(--bad); background: color-mix(in srgb, v
 .flaw small { color: var(--muted); font-size: 12px; }
 label.field small { font-size: 11.5px; line-height: 1.3; }
 @media (max-width: 760px) { .meters { flex-basis: 100%; order: 3; gap: 6px 10px; } .meter { min-width: 58px; } .dayctl { margin-left: auto; } }
+
+/* V3: party stances, schools, outlawed parties */
+.tablewrap { overflow-x: auto; max-width: 100%; }
+table.stances { border-collapse: collapse; width: 100%; font-size: 13px; min-width: 560px; }
+table.stances th, table.stances td { padding: 5px 8px; border-bottom: 1px solid var(--line); text-align: left; white-space: nowrap; }
+table.stances thead th { font: 600 11px/1.2 var(--font-mono); letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); vertical-align: bottom; white-space: normal; min-width: 84px; }
+table.stances tbody th { font-weight: 600; }
+table.stances tr.grouprow th { font: 700 10.5px/1 var(--font-mono); letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); padding-top: 12px; background: transparent; }
+.pdot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; background: var(--pc); margin-right: 5px; vertical-align: 0; }
+td.st { font: 600 11px/1 var(--font-mono); text-transform: uppercase; letter-spacing: 0.03em; }
+td.st.for { background: color-mix(in srgb, var(--good) 30%, transparent); }
+td.st.lfor { background: color-mix(in srgb, var(--good) 13%, transparent); }
+td.st.neutral { color: var(--muted); }
+td.st.lagainst { background: color-mix(in srgb, var(--bad) 12%, transparent); }
+td.st.against { background: color-mix(in srgb, var(--bad) 28%, transparent); }
+td.pub { display: flex; align-items: center; gap: 8px; }
+.pbar { display: inline-flex; width: 70px; height: 7px; background: var(--chip); border-radius: 3px; overflow: hidden; flex: none; }
+.pbar i { display: block; height: 100%; }
+.pbar i.f { background: var(--good); }
+.pbar i.a { background: var(--bad); margin-left: auto; }
+.chip.lean { opacity: 0.75; }
+.pcard.outlawed { border-style: dashed; }
+.row.outlaw { gap: 6px; }
+.row.outlaw select.plain { width: auto; padding: 4px 6px; font-size: 13px; }
+.subjects { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.subjects li { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 8px; align-items: center; font-size: 14px; }
+.subjects li .small { grid-column: 1 / -1; margin-top: -2px; }

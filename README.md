@@ -2,7 +2,7 @@
 
 A society sim by GooseKnightGaming. A yard of shipping containers has broken away from the country to run itself. Write its laws, live with its people, and keep hold of power, or take it.
 
-Current version: **V2**. Plain HTML, CSS and JavaScript. No libraries, no build step.
+Current version: **V3**. Plain HTML, CSS and JavaScript. No libraries, no build step.
 
 ## Play locally
 Open `index.html` in a browser.
@@ -12,7 +12,7 @@ Open `index.html` in a browser.
 2. In the repository, go to **Settings → Pages**, choose **Deploy from a branch**, pick `main` and `/ (root)`, then save.
 3. The game appears at `https://<your-username>.github.io/<repository-name>/` after a minute or two.
 
-The game saves itself in the browser. The Chronicle tab has a save code you can copy to move a game to another device. V1 saves load into V2 and are brought up to date automatically.
+The game saves itself in the browser. The Chronicle tab has a save code you can copy to move a game to another device. Older saves load into the current version and are brought up to date automatically.
 
 ## Two ways to start
 - **Found a commune.** You lead about two dozen settlers. First you write the founding constitution, for free: the kind of government, the gate, the work tax, wages, your salary, what happens when laws contradict, whether you're above the law, the name of the currency, and up to eight founding laws. After day one, changing any of it costs actions (and votes, in a democracy).
@@ -28,13 +28,16 @@ The game saves itself in the browser. The Chronicle tab has a save code you can 
 ## Laws
 A law is a sentence built from parts: **who** + **rule** + **behaviour**, enforced by **enforcement**, punished by **punishment**.
 
-- **Who:** all citizens, adults, children, elders, men, women, non-binary citizens, people in same-sex relationships, newcomers, founders, partnered or single people, parents, officials, people in no party, any trade, or the members of any party.
+- **Who:** all citizens, adults, children, elders, everyone 60 and over, retired citizens, trans citizens, men, women, non-binary citizens, people in same-sex relationships, newcomers, founders, partnered or single people, parents, officials, people in no party, any trade, or the members of any party.
 - **Rules:** may not, must, only once (a day, or in a lifetime for partnerships and children), need a permit, taxed, paid, honoured.
-- **Behaviours (27):** work, lessons, sharing food, hoarding water, private trade, meetings, worship, loud music, drinking, gambling, criticising the government, informing on neighbours, theft, protest, party work, carrying weapons, the uniform, the leader's address, care work, talking to outsiders, going about naked, forming partnerships, same-sex relationships, taking more than one partner, divorce, having children, leaving.
+- **What schools teach (8 subjects):** religion, sex and relationships, gender identity, politics and debate, loyalty to the leader, the outside world, practical trades, and the commune's own story. Schools must teach it, may not teach it, are encouraged to, or are discouraged from it. Teachers who disagree may defy the law. What children are taught shapes who they become at 16 (more devout, more loyal, more idealistic, more rebellious, more skilled), and parents care a lot.
+- **Behaviours (29):** work, lessons, sharing food, hoarding water, private trade, meetings, worship, loud music, drinking, gambling, criticising the government, informing on neighbours, theft, protest, party work, carrying weapons, the uniform, the leader's address, care work, talking to outsiders, going about naked, retiring, living as a gender other than the one assigned at birth, forming partnerships, same-sex relationships, taking more than one partner, divorce, having children, leaving.
 - **Enforcement:** honour system, neighbourhood watch, wardens, paid informants, cameras, secret police.
 - **Punishments:** warning, fines, community service, shaming, confiscation, loss of vote, detention, exile, flogging, torture, execution (by firing squad, hanging or lethal injection, in private or in public).
 
 Laws take effect the day after they pass. The constitution sets what happens when two laws contradict. Every law needs its own name: the builder flags a name that's already on the books. Repealed laws stay in the statute book, stamped REPEALED.
+
+Retirement is a choice people make as they get older, so you can ban it, require it (for elders, or everyone over 60), pay a daily pension, tax it or honour it. Some citizens are trans or questioning: you can recognise and honour transition, pay for it, or ban it, in which case trans people may stop living openly, leave, or be punished.
 
 So you can outlaw same-sex relationships or require them, make everyone go naked or ban it (or only for men, or only for women), require everyone to take more than one partner, and make divorce legal, paid, rationed, or punishable by death. People react according to who they are: their orientation, their traits and their values.
 
@@ -77,7 +80,16 @@ Executed, exiled, assassinated, overthrown, taken back by the outside world, col
 - `js/ui.js` — the interface.
 - `style.css` — the look.
 
+## Parties
+Join, leave, found or challenge for the leadership of a party. If you lead one, you can disband it. You can try to outlaw a rival party, unless it's the ruling party, holds a council majority, or counts most adults as members: as ruler you can simply decree it; in a democracy it goes to a vote. An outlawed party can't stand for election, its members bleed away, and party work is punished by whatever you chose. Harsh rulers will do the same to their rivals, possibly yours. The Politics tab has a full table of where every party, you and the public stand on every issue.
+
 ## Changelog
+**V3**
+- Laws on retirement (bans, requirements, pensions), gender identity, and what schools can, can't, should and shouldn't teach, with lasting effects on children.
+- Disband your own party; try to outlaw a rival. Outlawed parties fade, and AI rulers can outlaw parties too.
+- "Where the parties stand": every issue, every party, your platform and public opinion. Party cards list every position, including the ones they only lean on.
+- The Commune tab shows the school curriculum and what was taught yesterday.
+
 **V2**
 - The Yard: a live map of the commune. Buildings appear where they're fitted out, spare containers stack by the gate, and every citizen walks through yesterday again, from home to their two activities and back, from dawn to night. Colour people by trade, party, opinion of you or how they're doing. A smaller map sits on the Today tab.
 - Founding constitution: set it all up for free when you found a commune, including founding laws and the currency's name.
