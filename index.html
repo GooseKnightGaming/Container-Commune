@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Container Commune</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Allerta+Stencil&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="top">
+  <div class="brand">
+    <h1>CONTAINER <span>COMMUNE</span></h1>
+    <p id="where">GooseKnightGaming · <span id="ver"></span></p>
+  </div>
+  <div class="meters" id="meters"></div>
+  <div class="dayctl">
+    <div class="ap" id="ap" aria-label="Actions left today"></div>
+    <button class="btn primary big" id="end" type="button">End the day</button>
+  </div>
+</header>
+
+<nav class="tabs" role="tablist" aria-label="Sections">
+  <button type="button" role="tab" data-tab="today">Today</button>
+  <button type="button" role="tab" data-tab="yard">People</button>
+  <button type="button" role="tab" data-tab="laws">Laws</button>
+  <button type="button" role="tab" data-tab="politics">Politics</button>
+  <button type="button" role="tab" data-tab="commune">Commune</button>
+  <button type="button" role="tab" data-tab="chronicle">Chronicle</button>
+</nav>
+
+<div class="layout">
+  <main id="main" class="main"></main>
+  <aside id="drawer" class="drawer" aria-label="Details"></aside>
+</div>
+
+<div class="toasts" id="toasts" aria-live="polite"></div>
+<div class="overlay" id="overlay" hidden></div>
+
+<script src="js/data.js"></script>
+<script src="js/sim.js"></script>
+<script src="js/politics.js"></script>
+<script src="js/ui.js"></script>
+</body>
+</html>
