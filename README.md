@@ -2,7 +2,7 @@
 
 A society sim by GooseKnightGaming. A yard of shipping containers has broken away from the country to run itself. Write its laws, live with its people, and keep hold of power, or take it.
 
-Current version: **V4**. Plain HTML, CSS and JavaScript. No libraries, no build step.
+Current version: **V5**. Plain HTML, CSS and JavaScript. No libraries, no build step.
 
 ## Play locally
 Open `index.html` in a browser.
@@ -35,7 +35,7 @@ A law is a sentence built from parts: **who** + **rule** + **behaviour**, enforc
 - **What schools teach (8 subjects):** religion, sex and relationships, gender identity, politics and debate, loyalty to the leader, the outside world, practical trades, and the commune's own story. Schools must teach it, may not teach it, are encouraged to, or are discouraged from it. Teachers who disagree may defy the law. What children are taught shapes who they become at 16 (more devout, more loyal, more idealistic, more rebellious, more skilled), and parents care a lot.
 - **Behaviours (29):** work, lessons, sharing food, hoarding water, private trade, meetings, worship, loud music, drinking, gambling, criticising the government, informing on neighbours, theft, protest, party work, carrying weapons, the uniform, the leader's address, care work, talking to outsiders, going about naked, retiring, living as a gender other than the one assigned at birth, forming partnerships, same-sex relationships, taking more than one partner, divorce, having children, leaving.
 - **Enforcement:** honour system, neighbourhood watch, wardens, paid informants, cameras, secret police.
-- **Punishments:** warning, fines, community service, shaming, confiscation, loss of vote, detention, exile, flogging, torture, execution (by firing squad, hanging or lethal injection, in private or in public).
+- **Punishments:** warning, fines, community service, shaming, confiscation, loss of vote, detention, exile, flogging, torture, execution (by firing squad, hanging or lethal injection, in private or in public). Under Laws, then Punishments, you can **invent your own** of any kind (execution, torture, corporal punishment, amputation of a body part, imprisonment of any length, humiliation, hard labour, fines, exile, loss of rights), named whatever you like and carried out in public or in private, or **abolish** any punishment or a whole kind of them. Abolishing commutes every law that used it to the harshest punishment still allowed, and stops you ordering it. Both are constitutional changes: they cost an action and, in a democracy, go to a vote. The founding constitution can abolish kinds of punishment from day one.
 
 Laws take effect the day after they pass. The constitution sets what happens when two laws contradict. Every law needs its own name: the builder flags a name that's already on the books. Repealed laws stay in the statute book, stamped REPEALED.
 
@@ -86,6 +86,10 @@ Executed, exiled, assassinated, overthrown, taken back by the outside world, col
 Join, leave, found or challenge for the leadership of a party. If you lead one, you can disband it. You can try to outlaw a rival party, unless it's the ruling party, holds a council majority, or counts most adults as members: as ruler you can simply decree it; in a democracy it goes to a vote. An outlawed party can't stand for election, its members bleed away, and party work is punished by whatever you chose. Harsh rulers will do the same to their rivals, possibly yours. The Politics tab has a full table of where every party, you and the public stand on every issue.
 
 ## Changelog
+**V5**
+- Invent punishments (beheading, incineration, thumbscrews, the stocks, amputation of a hand, a month in the pit…) and abolish any punishment or a whole kind. Amputations have lasting effects.
+- Tidier: Laws, Politics and Commune are split into sections; the tab bar stays at the top as you scroll; the law builder sits beside its preview and forecast; your platform is edited directly in the "Where they stand" table; on phones the meters are one swipeable row.
+
 **V4**
 - A step-by-step law builder: policy area first, then topic, then what the law does, so earlier choices shape the later ones.
 - Fixed: punishments could silently take away all of your actions for a day. Now you always keep at least one while free, and the report and Today tab say exactly what cost you actions.
