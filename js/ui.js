@@ -280,7 +280,8 @@
       <div class="tags">${tags.join('')}</div>${mini}<div class="did">${esc(did)}</div></div>${gone}</button>`;
   }
   const regime = (c) => (isLeader() ? c.opinion : c.govt);
-  const sexWord = (c) => (c.age < 16 ? (CC.SEX_KID[c.sex] || 'child') : CC.SEX[c.sex] || '');
+  const leaderIsP = () => S.gov.leader === CC.PLAYER;
+  const sexWord = (c) => (c.age < 16 ? (CC.SEX_KID[c.sex] || 'child') : c.trans && c.sex !== 'x' ? 'trans ' + CC.SEX[c.sex] : CC.SEX[c.sex] || '');
   const attractWord = (c) => (c.orient === 'bi' ? 'anyone' : c.orient === 'gay' ? (c.sex === 'm' ? 'men' : c.sex === 'f' ? 'women' : 'people like them') : c.sex === 'm' ? 'women' : c.sex === 'f' ? 'men' : 'anyone');
 
   // ───────────────────────── drawer ─────────────────────────
@@ -292,7 +293,7 @@
     const p = party(c.party);
     const link = (id) => `<button type="button" class="linkish" data-person="${id}">${esc(P(id) ? (P(id).isPlayer ? 'You' : P(id).first) : '?')}</button>`;
     let h = `<button type="button" class="btn small close" data-close="1">Close</button><div class="who"><h3>${esc(name(c))}</h3>`;
-    h += `<div class="sub">${Math.floor(c.age)} years old · ${c.age >= 16 ? esc(CC.SEX[c.sex]) + ' · ' : ''}${c.age < 16 ? esc(sexWord(c)) : c.isPlayer ? (isLeader() ? 'leader' : 'citizen') : esc(CC.TRADES[c.trade] ? CC.TRADES[c.trade].label : c.trade)}${c.founder ? ' · founding member' : ''}${!c.founder && !c.bornHere && S.day - c.arrived < CC.YEAR ? ' · newcomer' : ''}${c.bornHere ? ' · born here' : ''}${c.status !== 'free' ? ` · <b>${esc(STATUS_WORD[c.status] || c.status)}</b>` : ''}</div></div>`;
+    h += `<div class="sub">${Math.floor(c.age)} years old · ${c.age >= 16 ? esc(sexWord(c)) + (c.closeted ? ' (not living openly)' : '') + ' · ' : ''}${c.age < 16 ? esc(sexWord(c)) : c.isPlayer ? (isLeader() ? 'leader' : 'citizen') : esc(CC.TRADES[c.trade] ? CC.TRADES[c.trade].label : c.trade)}${c.founder ? ' · founding member' : ''}${!c.founder && !c.bornHere && S.day - c.arrived < CC.YEAR ? ' · newcomer' : ''}${c.bornHere ? ' · born here' : ''}${c.status !== 'free' ? ` · <b>${esc(STATUS_WORD[c.status] || c.status)}</b>` : ''}</div></div>`;
     h += '<dl class="kv">';
     if (!c.isPlayer) {
       h += `<dt>Motive</dt><dd><b>${esc(CC.MOTIVE[c.motive].name)}.</b> ${esc(CC.MOTIVE[c.motive].blurb)}</dd>`;
@@ -302,6 +303,7 @@
       if (!isLeader()) h += `<dt>Of the govt</dt><dd>${feel(c.govt)} <span class="muted mono">(${R0(c.govt)})</span></dd>`;
       h += `<dt>Fear</dt><dd class="mono">${R0(c.fear)}</dd>`;
       h += `<dt>Health</dt><dd class="mono">${R0(c.health)}${c.ill ? ' · ill' : ''}</dd>`;
+      if (c.age < 16 && c.taught && Object.keys(c.taught).length) h += `<dt>Lessons</dt><dd>${esc(Object.entries(c.taught).sort((a, b) => b[1] - a[1]).map(([k, n]) => `${CC.BEH[k].short.toLowerCase()} (${n} day${n === 1 ? '' : 's'})`).join(', '))}</dd>`;
       if (c.age >= 16) h += `<dt>Drawn to</dt><dd>${esc(attractWord(c))} <span class="muted">(${esc(CC.ORIENT[c.orient])})</span></dd>`;
       if (c.age >= 16 && c.status === 'free') h += `<dt>Wages</dt><dd>${c.unpaid ? '<b>Went unpaid yesterday</b>' : c.wage ? esc(`Earned ${R0(c.wage * 10) / 10} scrip yesterday`) : 'Did no paid work yesterday'}</dd>`;
     }
@@ -367,10 +369,13 @@
     const rules = CC.rulesFor(draft.beh);
     if (!rules.includes(draft.rule)) draft.rule = rules[0];
     const R = CC.RULES[draft.rule];
-    const ruleLabel = (r) => ({ ban: 'may not', require: 'must', ration: B.kind === 'life' ? 'may only once' : 'may only once a day', license: 'need a permit to', tax: 'are taxed when they', subsidise: 'are paid when they', reward: 'are honoured when they' }[r]);
-    let s = `<select id="b-who" aria-label="Who">${opt(CC.whoOptions().map((o) => [o.key, o.label]), draft.who)}</select> `;
+    const sub = B.kind === 'subject';
+    if (sub) draft.who = 'schools'; else if (draft.who === 'schools') draft.who = 'everyone';
+    const ruleLabel = (r) => (sub ? { require: 'must', ban: 'may not', reward: 'are encouraged to', discourage: 'are discouraged from' } : { ban: 'may not', require: 'must', ration: B.kind === 'life' ? 'may only once' : 'may only once a day', license: 'need a permit to', tax: 'are taxed when they', subsidise: draft.beh === 'retire' ? 'get a daily pension when they' : 'are paid when they', reward: 'are honoured when they' })[r];
+    let s = `<select id="b-who" aria-label="Who">${opt(sub ? [['schools', 'Schools']] : CC.whoOptions().map((o) => [o.key, o.label]), draft.who)}</select> `;
     s += `<select id="b-rule" aria-label="Rule">${opt(rules.map((r) => [r, ruleLabel(r)]), draft.rule)}</select> `;
-    s += `<select id="b-beh" aria-label="Behaviour">${opt(Object.keys(CC.BEH).map((b) => [b, CC.BEH[b].label]), draft.beh)}</select>`;
+    const grp = (label, kind) => `<optgroup label="${label}">${opt(Object.keys(CC.BEH).filter((b) => CC.BEH[b].kind === kind).map((b) => [b, sub && kind === 'subject' && draft.rule === 'discourage' ? CC.BEH[b].ing : CC.BEH[b].label]), draft.beh)}</optgroup>`;
+    s += `<select id="b-beh" aria-label="Behaviour">${grp('Everyday life', 'day')}${grp('Life events', 'life')}${grp('What schools teach', 'subject')}</select>`;
     if (R.money) s += `, <select id="b-amount" aria-label="Amount">${opt([1, 2, 3, 5, 10].map((n) => [String(n), `${n} scrip`]), String(draft.amount))}</select> a time`;
     if (R.violation) {
       s += `, enforced by <select id="b-enf" aria-label="Enforcement">${opt(Object.entries(CC.ENF).map(([k, v]) => [k, v.label + (v.needs && !S.inst[v.needs] ? ' (not set up)' : '')]), draft.enf)}</select>`;
@@ -381,6 +386,7 @@
     const issue = CC.lawNameIssue(draft.name);
     let h = `<label class="field" style="margin-bottom:10px"><span>Name</span><input id="b-name" class="plain${issue ? ' invalid' : ''}" type="text" maxlength="48" value="${escRaw(draft.name)}" aria-describedby="b-namewarn"${issue ? ' aria-invalid="true"' : ''}></label><div id="b-namewarn" class="namewarn" role="status"${issue ? '' : ' hidden'}>${esc(issue || '')}</div>`;
     h += `<div class="sentence">${s}</div>`;
+    h += `<p class="small muted" style="margin:-4px 0 8px">In full: ${esc(CC.describeLaw(CC._laws.buildLaw({ ...draft })))}</p>`;
     h += `<div class="forecast">${forecast()}</div>`;
     const label = isLeader() ? (demo() ? `Put it to the ${S.gov.type === 'council' ? 'council' : 'assembly'}` : 'Decree this law') : S.gov.type === 'council' ? 'Ask a councillor to propose it' : S.gov.type === 'assembly' ? 'Put it to the assembly' : 'Petition the ruler';
     h += `<div class="row">${abtn('proposeLaw', { spec: { ...draft } }, label, 'primary')}</div>`;
@@ -520,11 +526,16 @@
     for (const p of live) {
       const mem = S.people.filter((c) => alive(c) && c.party === p.id && c.age >= 16);
       const lp = P(p.leader);
-      const st = Object.entries(p.stance).filter(([, v]) => Math.abs(v) >= 0.3).sort((a, b) => Math.abs(b[1]) - Math.abs(a[1])).slice(0, 8);
-      h += `<div class="pcard" style="--pc:${p.color}"><div class="spread"><h3>${esc(p.name)}</h3><span class="small muted">${mem.length} member${mem.length === 1 ? '' : 's'}</span></div>`;
+      const st = Object.entries(p.stance).filter(([, v]) => Math.abs(v) >= 0.2).sort((a, b) => Math.abs(b[1]) - Math.abs(a[1]));
+      h += `<div class="pcard${p.outlawed ? ' outlawed' : ''}" style="--pc:${p.color}"><div class="spread"><h3>${esc(p.name)}${p.outlawed ? ' <span class="chip bad">Outlawed</span>' : ''}</h3><span class="small muted">${mem.length} member${mem.length === 1 ? '' : 's'}</span></div>`;
       h += `<div class="small">Led by ${lp ? (lp.isPlayer ? '<b>you</b>' : `<button type="button" class="linkish" data-person="${lp.id}">${esc(name(lp))}</button>`) : 'nobody'}${p.motive === 'power' ? ' · in it for power' : ''}</div>`;
-      h += `<div class="stance">${st.map(([b, v]) => `<span class="chip ${v > 0 ? 'good' : 'bad'}">${v > 0 ? 'for' : 'against'} ${esc(CHIP[b] || b)}</span>`).join('') || '<span class="small muted">No clear positions.</span>'}</div>`;
-      h += `<div class="row">${me.party === p.id ? (p.leader === CC.PLAYER ? '<span class="small muted">You lead this party.</span>' + abtn('leaveParty', {}, 'Leave', 'small') : abtn('challenge', {}, 'Challenge for the leadership', 'small') + abtn('leaveParty', {}, 'Leave', 'small')) : abtn('join', { party: p.id }, 'Join', 'small')}<button type="button" class="btn small" data-pfilter-go="party:${p.id}">Members</button></div></div>`;
+      h += `<div class="stance">${st.map(([b, v]) => `<span class="chip ${v > 0 ? 'good' : 'bad'}${Math.abs(v) < 0.5 ? ' lean' : ''}">${Math.abs(v) < 0.5 ? 'leans ' : ''}${v > 0 ? 'for' : 'against'} ${esc(CHIP[b] || b)}</span>`).join('') || '<span class="small muted">No clear positions.</span>'}</div>`;
+      h += `<div class="row">${me.party === p.id ? (p.leader === CC.PLAYER ? '<span class="small muted">You lead this party.</span>' + abtn('leaveParty', {}, 'Leave', 'small') + abtn('disbandParty', {}, 'Disband it', 'small danger') : abtn('challenge', {}, 'Challenge for the leadership', 'small') + abtn('leaveParty', {}, 'Leave', 'small')) : abtn('join', { party: p.id }, p.outlawed ? 'Join (illegally)' : 'Join', 'small')}<button type="button" class="btn small" data-pfilter-go="party:${p.id}">Members</button></div>`;
+      if (me.party !== p.id && !p.outlawed) {
+        const why = CC.can('outlawParty', { party: p.id, pun: 'fine' });
+        h += `<div class="row outlaw"><label class="small muted" for="opun-${p.id}">Outlaw it, punishing party work with</label><select class="plain small" id="opun-${p.id}"${why ? ' disabled' : ''}>${opt([['warning', 'a warning'], ['fine', 'a fine'], ['bigfine', 'a big fine'], ['novote', 'loss of the vote'], ['detention', 'detention'], ['longdet', 'a week inside'], ['exile', 'exile'], ['execution', 'execution']], 'fine')}</select><button type="button" class="btn small danger" data-outlaw="${p.id}"${why ? ` disabled title="${esc(why)}"` : ''}>${leaderIsP() && !demo() ? 'Outlaw it' : 'Put it to a vote'}<span class="cost">1 AP</span></button></div>${why ? `<p class="small muted">${esc(why)}</p>` : ''}`;
+      }
+      h += '</div>';
     }
     if (!live.length) h += '<p class="empty">No parties yet.</p>';
     h += `</div><div class="sect" style="margin-top:14px">Found a party</div><div class="row"><input id="partyname" class="plain" style="flex:1;min-width:160px" maxlength="32" placeholder="Party name" value="${esc(viewPolitics.pname || '')}"><button type="button" class="btn" id="foundbtn"${CC.can('found', { name: viewPolitics.pname || '' }) ? ` disabled title="${esc(CC.can('found', { name: viewPolitics.pname || '' }))}"` : ''}>Found it<span class="cost">1 AP</span></button></div><p class="small muted" style="margin-top:6px">It takes your platform as its policies.</p></section>`;
@@ -536,6 +547,7 @@
       h += `<span>${esc(CHIP[b] || b)}</span><span class="seg" role="group" aria-label="${esc(CHIP[b])}"><button type="button" class="${v < 0 ? 'on against' : ''}" data-plat="${b}" data-v="-1">Against</button><button type="button" class="${!v ? 'on' : ''}" data-plat="${b}" data-v="0">–</button><button type="button" class="${v > 0 ? 'on for' : ''}" data-plat="${b}" data-v="1">For</button></span>`;
     }
     h += '</div></section>';
+    h += stanceTable();
     // shadows
     const odds = CC.coupOdds();
     const plot = S.playerPlot != null ? S.plots.find((x) => x.id === S.playerPlot) : null;
@@ -559,6 +571,37 @@
     return h;
   }
 
+  // every issue, every party, you and the public
+  function stanceTable() {
+    const parties = S.parties.filter((p) => !p.dissolved);
+    const mine = CC.playerStance() || {};
+    const adults = S.people.filter((c) => alive(c) && !c.isPlayer && c.age >= 16);
+    const pub = {};
+    for (const b of CC.POLICY_BEH) pub[b] = { f: 0, a: 0 };
+    for (const c of adults) { const d = CC.desires(c); for (const b of CC.POLICY_BEH) { if ((d[b] || 0) > 0.2) pub[b].f++; else if ((d[b] || 0) < -0.2) pub[b].a++; } }
+    const cell = (v) => {
+      const k = v >= 0.5 ? 'for' : v >= 0.2 ? 'lfor' : v <= -0.5 ? 'against' : v <= -0.2 ? 'lagainst' : 'neutral';
+      const t = { for: 'For', lfor: 'Leans for', neutral: 'Neutral', lagainst: 'Leans against', against: 'Against' }[k];
+      return `<td class="st ${k}">${t}</td>`;
+    };
+    const rows = CC.POLICY_BEH.filter((b) => stanceAll || parties.some((p) => Math.abs(p.stance[b] || 0) >= 0.2) || Math.abs(mine[b] || 0) > 0);
+    const groupOf = (b) => ({ day: 'Everyday life', life: 'Life events', subject: 'Schools' }[CC.BEH[b].kind]);
+    let h = `<section class="panel" style="grid-column:1/-1"><h2><span>Where the parties stand</span><span class="r"><label class="small"><input type="checkbox" id="stanceall"${stanceAll ? ' checked' : ''}> Show every issue</label></span></h2>`;
+    h += '<div class="tablewrap"><table class="stances"><thead><tr><th scope="col">Issue</th>';
+    for (const p of parties) h += `<th scope="col"><span class="pdot" style="--pc:${p.color}"></span>${esc(p.name.replace(/^The /, ''))}${p.outlawed ? ' <span class="muted">(outlawed)</span>' : ''}</th>`;
+    h += '<th scope="col">You</th><th scope="col">The public</th></tr></thead><tbody>';
+    let last = '';
+    for (const b of rows) {
+      const g = groupOf(b);
+      if (g !== last) { h += `<tr class="grouprow"><th colspan="${parties.length + 3}">${g}</th></tr>`; last = g; }
+      const pu = pub[b], tot = Math.max(1, adults.length);
+      h += `<tr><th scope="row">${esc(CHIP[b] || b)}</th>${parties.map((p) => cell(p.stance[b] || 0)).join('')}${cell(mine[b] || 0)}<td class="pub"><span class="pbar"><i class="f" style="width:${(pu.f / tot) * 100}%"></i><i class="a" style="width:${(pu.a / tot) * 100}%"></i></span><span class="mono small">${R0((pu.f / tot) * 100)}% for · ${R0((pu.a / tot) * 100)}% against</span></td></tr>`;
+    }
+    h += '</tbody></table></div>';
+    h += '<p class="small muted" style="margin-top:8px">Party positions drift towards what their members want, unless you lead the party. "The public" is how many adults want more or less of each thing, whatever the law says.</p></section>';
+    return h;
+  }
+  let stanceAll = false;
   // ───────────────────────── commune ─────────────────────────
   function viewCommune() {
     let h = '<div class="cols">';
@@ -573,6 +616,7 @@
     const lastR = S.report && S.report.stats ? S.report.stats : {};
     h += `<p class="small muted" style="margin-top:10px">${esc(`Wage ${S.gov.wage} scrip a shift · work tax ${R0(S.gov.tax * 100)}% · leader's salary ${S.gov.salary} a day · yesterday's wage bill ${lastR.wages || 0}${lastR.unpaid ? `, ${lastR.unpaid} shifts unpaid` : ''} · gate: ${CC.GATE[S.gov.gate].toLowerCase()}`)}</p></section>`;
     // history
+    h += schoolsPanel();
     h += `<section class="panel"><h2>Over time</h2>${spark()}<div class="stats" style="margin-top:12px"><div class="stat"><b>Births</b><span>${S.stats.births}</span></div><div class="stat"><b>Deaths</b><span>${S.stats.deaths}</span></div><div class="stat"><b>Arrivals</b><span>${S.stats.arrivals}</span></div><div class="stat"><b>Departures</b><span>${S.stats.departures}</span></div><div class="stat"><b>Executions</b><span>${S.stats.executions}</span></div><div class="stat"><b>Laws passed</b><span>${S.stats.laws}</span></div></div></section>`;
     // build
     h += `<section class="panel" style="grid-column:1/-1"><h2><span>Fit out a container</span><span class="r">${S.containers} spare · ${R0(S.materials)} materials</span></h2><div class="builds">`;
@@ -580,6 +624,19 @@
       h += `<div class="bcard"><h3><span>${esc(B.label)}</span><span class="mono small">×${S.buildings[k] || 0}</span></h3><p>${esc(B.desc)}</p><p class="mono small">${B.size} container${B.size > 1 ? 's' : ''} · ${B.mat} materials${B.upkeep ? ` · ${B.upkeep}/day` : ''}</p>${isLeader() ? `<div class="row">${abtn('build', { type: k }, 'Build', 'small')}${S.buildings[k] ? abtn('demolish', { type: k }, 'Strip out', 'small') : ''}</div>` : ''}</div>`;
     }
     h += '</div></section></div>';
+    return h;
+  }
+  function schoolsPanel() {
+    const teachers = S.people.filter((c) => c.status === 'free' && c.trade === 'teacher' && c.age >= 16).length;
+    const kids = S.people.filter((c) => alive(c) && c.age >= 6 && c.age < 16).length;
+    let h = `<section class="panel"><h2><span>Schools</span><span class="r">${teachers} teacher${teachers === 1 ? '' : 's'} · ${kids} school-age child${kids === 1 ? '' : 'ren'}${S.buildings.school ? ' · a school' : ' · no school building'}</span></h2><ul class="subjects">`;
+    for (const sub of CC.SUBJECTS) {
+      const L = CC.subjectLaw(sub);
+      const law = L ? { require: 'Compulsory', ban: 'Banned', reward: 'Encouraged', discourage: 'Discouraged' }[L.rule] : 'Up to teachers';
+      const t = S.taught ? S.taught[sub] : null;
+      h += `<li><span>${esc(CC.BEH[sub].short)}</span><span class="chip${L ? (L.rule === 'ban' ? ' bad' : L.rule === 'require' ? ' good' : ' warn') : ''}">${law}</span><span class="small ${t ? '' : 'muted'}">${t == null ? '' : t ? 'taught yesterday' : 'not taught yesterday'}</span></li>`;
+    }
+    h += '</ul><p class="small muted" style="margin-top:8px">Write laws on what schools teach in the Laws tab ("What schools teach"). Teachers who disagree with the law may defy it. What children learn shapes who they become at 16.</p></section>';
     return h;
   }
   function spark() {
@@ -629,6 +686,8 @@
     const yc = root.querySelector('#ycolor'); if (yc) yc.addEventListener('change', () => { window.CCYard.setColorBy(yc.value); const lg = root.querySelector('.legend'); if (lg) lg.innerHTML = legend(); });
     root.querySelectorAll('[data-cfilter]').forEach((b) => b.addEventListener('click', () => { chronFilter = b.dataset.cfilter; render(); }));
     root.querySelectorAll('[data-plat]').forEach((b) => b.addEventListener('click', () => { CC.setPlatform(b.dataset.plat, Number(b.dataset.v)); save(); render(); }));
+    root.querySelectorAll('[data-outlaw]').forEach((b) => b.addEventListener('click', () => { const id = Number(b.dataset.outlaw); const sel = root.querySelector('#opun-' + id); act('outlawParty', { party: id, pun: sel ? sel.value : 'fine' }); }));
+    const sa = root.querySelector('#stanceall'); if (sa) sa.addEventListener('change', () => { stanceAll = sa.checked; render(); });
     const ps = root.querySelector('#psort'); if (ps) ps.addEventListener('change', () => { peopleSort = ps.value; render(); });
     const sd = root.querySelector('#standing'); if (sd) sd.addEventListener('change', () => { CC.setStanding(sd.checked); save(); render(); });
     const pn = root.querySelector('#partyname'); if (pn) pn.addEventListener('input', () => { viewPolitics.pname = pn.value; const fb = root.querySelector('#foundbtn'); const why = CC.can('found', { name: pn.value }); fb.disabled = !!why; fb.title = why || ''; });

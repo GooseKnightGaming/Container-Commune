@@ -7,7 +7,7 @@
   'use strict';
   const CC = (root.CC = root.CC || {});
   CC.inSameSex = (c) => { const S = CC.S; if (!S) return false; const ps = [c.partner, ...(c.extra || [])].filter((x) => x != null).map((id) => S.people[id]); return ps.some((p) => p && p.sex === c.sex && c.sex !== 'x' && (p.status === 'free' || p.status === 'detained')); };
-  CC.VERSION = 'V2';
+  CC.VERSION = 'V3';
   CC.YEAR = 24;                       // days in a year (4 seasons of 6 days)
   CC.SEASONS = ['Spring', 'Summer', 'Autumn', 'Winter'];
   CC.ADULT = 16;                      // age of majority: can work, vote and stand
@@ -51,9 +51,21 @@
     divorce:   { label: 'divorce their partner', act: 'divorce', short: 'Divorced', kind: 'life', value: -0.1, minAge: 18 },
     child:     { label: 'have a child', act: 'have a child', short: 'Had a child', kind: 'life', value: 0.5, minAge: 18, maxAge: 50 },
     leave:     { label: 'leave the commune', act: 'leave', short: 'Left', kind: 'life', value: -0.6, minAge: 16 },
+    retire:    { label: 'retire', act: 'retire', short: 'Retired', kind: 'life', value: 0.4, minAge: 55 },
+    transition:{ label: 'live as a gender other than the one they were assigned at birth', act: 'transition', short: 'Transitioned', kind: 'life', value: 0.05, minAge: 16 },
+    // what schools teach: laws on these bind the teachers
+    teach_religion:  { label: 'teach religion', ing: 'teaching religion', short: 'Religion', kind: 'subject', value: 0, minAge: 16 },
+    teach_relations: { label: 'teach sex and relationships', ing: 'teaching sex and relationships', short: 'Sex and relationships', kind: 'subject', value: 0.2, minAge: 16 },
+    teach_gender:    { label: 'teach about gender identity', ing: 'teaching about gender identity', short: 'Gender identity', kind: 'subject', value: -0.1, minAge: 16 },
+    teach_politics:  { label: 'teach politics and debate', ing: 'teaching politics and debate', short: 'Politics and debate', kind: 'subject', value: 0.2, minAge: 16 },
+    teach_loyalty:   { label: 'teach loyalty to the leader', ing: 'teaching loyalty to the leader', short: 'Loyalty to the leader', kind: 'subject', value: 0, minAge: 16 },
+    teach_outside:   { label: 'teach about the outside world', ing: 'teaching about the outside world', short: 'The outside world', kind: 'subject', value: 0.1, minAge: 16 },
+    teach_trades:    { label: 'teach practical trades', ing: 'teaching practical trades', short: 'Practical trades', kind: 'subject', value: 0.7, minAge: 16 },
+    teach_history:   { label: "teach the commune's own story", ing: "teaching the commune's own story", short: "The commune's story", kind: 'subject', value: 0.5, minAge: 16 },
   };
   for (const k in CC.BEH) { CC.BEH[k].kind = CC.BEH[k].kind || 'day'; CC.BEH[k].maxAge = CC.BEH[k].maxAge || 200; }
   CC.DAY_BEH = Object.keys(CC.BEH).filter((k) => CC.BEH[k].kind === 'day');
+  CC.SUBJECTS = Object.keys(CC.BEH).filter((k) => CC.BEH[k].kind === 'subject');
 
   /* GROUPS a law can apply to. Party and trade groups are added at runtime. */
   CC.WHO = {
@@ -74,9 +86,14 @@
     women:       { label: 'Women', test: (c) => c.sex === 'f', spec: 2 },
     nonbinary:   { label: 'Non-binary citizens', test: (c) => c.sex === 'x', spec: 3 },
     samesexers:  { label: 'People in same-sex relationships', test: (c) => CC.inSameSex(c), spec: 3 },
+    trans:       { label: 'Trans citizens', test: (c) => !!c.trans, spec: 3 },
+    retired:     { label: 'Retired citizens', test: (c) => !!c.retired, spec: 2 },
+    over60:      { label: 'Everyone 60 and over', test: (c) => c.age >= 60, spec: 2 },
+    schools:     { label: 'Schools', test: (c) => c.trade === 'teacher' && c.age >= 16, spec: 1, subjectOnly: true },
   };
   /* short nouns for behaviours, used in party platforms and speeches */
-  CC.NOUN = { work: 'work', study: 'lessons', share: 'sharing food', hoard: 'hoarding water', trade: 'private trade', gather: 'meetings', worship: 'worship', music: 'loud music', drink: 'drinking', gamble: 'gambling', criticise: 'criticism', report: 'informing', steal: 'theft', protest: 'protest', organise: 'party work', weapon: 'weapons', uniform: 'the uniform', address: "the leader's address", volunteer: 'care work', outside: 'talking to outsiders', naked: 'nudity', partner: 'partnerships', samesex: 'same-sex couples', polygamy: 'polygamy', divorce: 'divorce', child: 'having children', leave: 'leaving' };
+  CC.NOUN = { work: 'work', study: 'lessons', share: 'sharing food', hoard: 'hoarding water', trade: 'private trade', gather: 'meetings', worship: 'worship', music: 'loud music', drink: 'drinking', gamble: 'gambling', criticise: 'criticism', report: 'informing', steal: 'theft', protest: 'protest', organise: 'party work', weapon: 'weapons', uniform: 'the uniform', address: "the leader's address", volunteer: 'care work', outside: 'talking to outsiders', naked: 'nudity', partner: 'partnerships', samesex: 'same-sex couples', polygamy: 'polygamy', divorce: 'divorce', child: 'having children', leave: 'leaving', retire: 'retirement', transition: 'gender transition',
+    teach_religion: 'religion in schools', teach_relations: 'sex education', teach_gender: 'gender identity in schools', teach_politics: 'politics in schools', teach_loyalty: 'loyalty lessons', teach_outside: 'teaching about the outside', teach_trades: 'trades in schools', teach_history: "the commune's story in schools" };
   CC.SEX = { m: 'man', f: 'woman', x: 'non-binary' };
   CC.SEX_KID = { m: 'boy', f: 'girl', x: 'child' };
   CC.ORIENT = { straight: 'straight', gay: 'gay', bi: 'bisexual' };
@@ -90,6 +107,7 @@
     tax:       { label: 'are taxed to',      dir: -0.6, money: true },
     subsidise: { label: 'are paid to',       dir: 0.6,  money: true },
     reward:    { label: 'are honoured for',  dir: 0.4 },
+    discourage:{ label: 'are discouraged from', dir: -0.4 },
   };
   CC.LICENSE_FEE = 15;
 
@@ -124,23 +142,23 @@
 
   /* TRAITS: likes = how much they want to do a behaviour; values = what they think is good for the commune. */
   CC.TRAITS = {
-    Diligent:        { likes: { work: 22, study: 10 } },
-    Lazy:            { likes: { work: -22, drink: 10, music: 6, gamble: 6 } },
-    Devout:          { likes: { worship: 34, drink: -8, gamble: -10, naked: -30 }, values: { worship: 0.9, gamble: -1, drink: -0.8, naked: -1, samesex: -0.9, polygamy: -1, divorce: -1 } },
-    Rebellious:      { likes: { criticise: 22, music: 12, protest: 14, uniform: -20, address: -14, naked: 12 }, values: { criticise: 0.8, music: 0.5, protest: 0.6, leave: 0.5, naked: 0.3, samesex: 0.4, divorce: 0.4 } },
+    Diligent:        { likes: { work: 22, study: 10 }, values: { retire: -0.3, teach_trades: 1 } },
+    Lazy:            { likes: { work: -22, drink: 10, music: 6, gamble: 6 }, values: { retire: 0.8 } },
+    Devout:          { likes: { worship: 34, drink: -8, gamble: -10, naked: -30 }, values: { worship: 0.9, gamble: -1, drink: -0.8, naked: -1, samesex: -0.9, polygamy: -1, divorce: -1, transition: -0.8, teach_religion: 1, teach_relations: -0.8, teach_gender: -1 } },
+    Rebellious:      { likes: { criticise: 22, music: 12, protest: 14, uniform: -20, address: -14, naked: 12 }, values: { criticise: 0.8, music: 0.5, protest: 0.6, leave: 0.5, naked: 0.3, samesex: 0.4, divorce: 0.4, transition: 0.4, teach_loyalty: -1, teach_outside: 0.6 } },
     Gossip:          { likes: { gather: 20, criticise: 5, report: 6, outside: 6 } },
     'Light-fingered':{ likes: { steal: 26, gamble: 8 } },
     Generous:        { likes: { share: 26, volunteer: 18 } },
     Busybody:        { likes: { report: 26 }, values: { report: 0.8 } },
-    Paranoid:        { likes: { report: 16, weapon: 14 }, values: { criticise: -1, report: 0.8, weapon: 0.4 } },
+    Paranoid:        { likes: { report: 16, weapon: 14 }, values: { criticise: -1, report: 0.8, weapon: 0.4, teach_outside: -0.8, teach_loyalty: 0.4 } },
     Ambitious:       { likes: { trade: 20, work: 8, organise: 14 } },
     Timid:           { likes: { criticise: -22, protest: -24, weapon: -10, naked: -14 } },
     'Hot-headed':    { likes: { drink: 14, criticise: 10, protest: 10, weapon: 10 } },
     Romantic:        { likes: { gather: 6, music: 4, naked: 4 }, values: { samesex: 0.5, polygamy: 0.2 } },
-    'Family-minded': { likes: { volunteer: 6 }, values: { child: 1, partner: 0.9, divorce: -0.6, polygamy: -0.5 } },
-    Loyal:           { likes: { uniform: 16, address: 16, criticise: -14, naked: -6 }, values: { uniform: 0.8, address: 0.6, criticise: -0.8, report: 0.4 } },
-    Idealist:        { likes: { organise: 22, protest: 8 }, values: { organise: 0.7, protest: 0.4, samesex: 0.6, divorce: 0.2 } },
-    Cynic:           { likes: { address: -16, uniform: -10, gamble: 6 }, values: { address: -0.6, uniform: -0.4 } },
+    'Family-minded': { likes: { volunteer: 6 }, values: { child: 1, partner: 0.9, divorce: -0.6, polygamy: -0.5, teach_relations: -0.3, teach_history: 0.5 } },
+    Loyal:           { likes: { uniform: 16, address: 16, criticise: -14, naked: -6 }, values: { uniform: 0.8, address: 0.6, criticise: -0.8, report: 0.4, teach_loyalty: 1, teach_history: 0.8, teach_politics: -0.3 } },
+    Idealist:        { likes: { organise: 22, protest: 8 }, values: { organise: 0.7, protest: 0.4, samesex: 0.6, divorce: 0.2, transition: 0.6, teach_politics: 0.9, teach_gender: 0.5, teach_loyalty: -0.8, teach_outside: 0.4 } },
+    Cynic:           { likes: { address: -16, uniform: -10, gamble: 6 }, values: { address: -0.6, uniform: -0.4, teach_loyalty: -0.6, teach_history: -0.2 } },
   };
   CC.MOTIVE = {
     self:     { name: 'Self', short: 'S', blurb: 'Looks after their own needs first.', likes: { hoard: 10, steal: 6, share: -14, trade: 6, volunteer: -10 } },

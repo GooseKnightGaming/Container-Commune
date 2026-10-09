@@ -52,6 +52,7 @@
   function partyTick(R) {
     for (const p of S.parties.filter((x) => !x.dissolved)) {
       const mem = members(p);
+      if (p.outlawed) for (const c of mem) if (!c.isPlayer && c.id !== p.leader && chance(has(c, 'Rebellious') || has(c, 'Idealist') ? 0.015 : 0.06)) { c.party = null; if (chance(0.4)) R.politics.push(`${c.first} quietly left ${p.name}, now that it's outlawed.`); }
       if (!mem.length) { p.dissolved = true; log(`${p.name} dissolved: it had no members left.`, 'politics'); R.politics.push(`${p.name} has dissolved.`); continue; }
       const L = P(p.leader);
       if (!L || !alive(L) || L.party !== p.id) {
@@ -76,7 +77,7 @@
       }
     }
     // joining and leaving
-    const live = S.parties.filter((x) => !x.dissolved);
+    const live = S.parties.filter((x) => !x.dissolved && !x.outlawed);
     for (const c of npcFree()) {
       if (c.age < 16) continue;
       const cur = partyOf(c);
@@ -246,7 +247,7 @@
   CC.setLeader = setLeader;
   function lists() {
     const out = [];
-    for (const p of S.parties.filter((x) => !x.dissolved)) {
+    for (const p of S.parties.filter((x) => !x.dissolved && !x.outlawed)) {
       const mem = members(p).filter((c) => c.status === 'free' || c.isPlayer);
       if (!mem.length) continue;
       const lead = P(p.leader);
@@ -525,8 +526,8 @@
       decideRepeal(worst.L, S.gov.leader, R);
     }
   }
-  const TOPIC_NEG = { samesex: 'Natural Family', naked: 'Public Decency', polygamy: 'One Partner', divorce: 'Sacred Bond', partner: 'Single Life', child: 'Family Limits', leave: 'Stay Put', organise: 'Party Ban', worship: 'Secular Yard' };
-  const TOPIC_POS = { samesex: 'Love Is Love', naked: 'Free Body', polygamy: 'Open Hearts', divorce: 'Free to Leave', partner: 'Partnership', child: 'Growing Family', worship: 'Faith', criticise: 'Free Speech', protest: 'Right to Protest', outside: 'Open Door' };
+  const TOPIC_NEG = { retire: 'Working Life', transition: 'Birth Sex', teach_religion: 'Secular Schools', teach_relations: 'Innocence', teach_gender: 'Parental Rights', teach_politics: 'Neutral Classroom', teach_loyalty: 'Free Minds', teach_outside: 'Inward Schools', teach_trades: 'Academic Schools', teach_history: 'Fresh Start', samesex: 'Natural Family', naked: 'Public Decency', polygamy: 'One Partner', divorce: 'Sacred Bond', partner: 'Single Life', child: 'Family Limits', leave: 'Stay Put', organise: 'Party Ban', worship: 'Secular Yard' };
+  const TOPIC_POS = { retire: 'Pension', transition: 'Gender Recognition', teach_religion: 'Faith Schools', teach_relations: 'Relationships Education', teach_gender: 'Inclusive Schools', teach_politics: 'Civic Education', teach_loyalty: 'Loyal Youth', teach_outside: 'Wider World', teach_trades: 'Skilled Hands', teach_history: 'Our Story', samesex: 'Love Is Love', naked: 'Free Body', polygamy: 'Open Hearts', divorce: 'Free to Leave', partner: 'Partnership', child: 'Growing Family', worship: 'Faith', criticise: 'Free Speech', protest: 'Right to Protest', outside: 'Open Door' };
   const TOPIC = { naked: 'Clothing', samesex: 'Partnership', polygamy: 'Marriage', divorce: 'Divorce', music: 'Quiet Hours', drink: 'Sober Yard', gamble: 'Fair Play', criticise: 'Respect', steal: 'Property', hoard: 'Water Discipline', share: 'Kettle', work: 'Busy Hands', worship: 'Faith', protest: 'Public Order', organise: 'Party', weapon: 'Disarmament', uniform: 'Uniform', address: 'Attendance', volunteer: 'Care', outside: 'Gate Silence', report: 'Vigilance', gather: 'Assembly', trade: 'Market', study: 'Schooling', partner: 'Partnership', child: 'Family' };
   function aiLawName(b, rule) {
     const kind = rule === 'subsidise' || rule === 'reward' ? pick(['Act', 'Charter', 'Scheme']) : pick(['Act', 'Order', 'Edict', 'Rule', 'Decree']);
@@ -568,6 +569,15 @@
     const L = CC._laws.buildLaw(spec);
     const res = decideLaw(L, lead.id, R);
     if (!demo() && res.passed) R.politics.push(`${lead.first} decreed “${L.name}”.`);
+    // harsh rulers outlaw rival parties
+    if (harsh && !demo() && chance(0.05)) {
+      const rival = S.parties.filter((p) => !p.dissolved && !p.outlawed && (!party || p.id !== party.id)).sort((a, b) => members(b).length - members(a).length)[0];
+      if (rival && members(rival).length >= 2) {
+        const L2 = CC._laws.buildLaw({ name: CC.uniqueLawName(`The ${rival.name.replace(/^The /, '')} Ban`), who: 'party:' + rival.id, rule: 'ban', beh: 'organise', enf: S.inst.police ? 'police' : 'wardens', pun: pick(['detention', 'longdet', 'exile']), outlaws: rival.id, by: lead.id });
+        decideLaw(L2, lead.id, R);
+        return;
+      }
+    }
     // the slide to dictatorship
     if (demo() && harsh && has(lead, 'Ambitious') && S.legitimacy < 35 && security() > 10 && chance(0.08)) {
       S.gov.type = 'dictatorship'; S.gov.council = []; S.gov.nextElection = null; S.legitimacy = clamp(S.legitimacy - 20, 0, 100);
@@ -671,7 +681,7 @@
 
 
   // ───────────────────────── proposals: citizens bring laws to you ─────────────────────────
-  const SOCIAL = ['samesex', 'naked', 'polygamy', 'divorce'];
+  const SOCIAL = ['samesex', 'naked', 'polygamy', 'divorce', 'transition', 'retire', ...CC.SUBJECTS];
   const cap = (t) => t.charAt(0).toUpperCase() + t.slice(1);
   const SAY = {
     samesex: { neg: ["It isn't natural, and it isn't how I was raised.", 'Children need a mother and a father. The law should say so.', "I don't want it in my yard."],
@@ -687,8 +697,23 @@
       pos: ["Nobody should be trapped with someone they've stopped loving.", 'People change. The law should let them.'],
       req: ['Every partnership should be renewed or ended. No one stays by habit.'] },
   };
+  Object.assign(SAY, {
+    transition: { neg: ['You are what you were born. The law should say so.', "I don't understand it, and I don't want it in my yard.", 'Let people be, but not in the paperwork.'],
+      pos: ['People know who they are better than any rule does.', 'Nobody should have to hide who they are here.', 'If someone tells you who they are, believe them.'],
+      req: ['Everyone should question what they were told about themselves.'] },
+    retire: { neg: ['Every pair of hands is needed. Nobody stops working while they can still stand.', "A commune can't carry people who've stopped pulling their weight."],
+      pos: ["They built this place. They've earned a rest.", 'Pay people a decent pension and let the young ones take over.'],
+      req: ['Make way for the young. Past a certain age, step back.', 'Old hands slow the work down. Retire them.'] },
+  });
   function sayFor(b, rule) {
     const B = BEH[b], noun = CC.NOUN[b] || B.label;
+    if (B.kind === 'subject') {
+      const subj = B.short.toLowerCase();
+      if (rule === 'require') return pick([`Every child should learn ${subj}. Make it compulsory.`, `If schools won't teach ${subj}, make them.`]);
+      if (rule === 'reward') return pick([`Our children need more ${subj}.`, `Schools should be doing more ${subj}.`]);
+      if (rule === 'ban') return pick([`Schools have no business teaching ${subj}.`, `Keep ${subj} out of our classrooms.`, `That's for parents to teach, not schools.`]);
+      return pick([`Less ${subj} in schools, please.`, `There's too much ${subj} in lessons already.`]);
+    }
     const set = SAY[b];
     const dir = RULES[rule].dir;
     if (set) return pick(rule === 'require' && set.req ? set.req : dir < 0 ? set.neg : set.pos);
@@ -716,10 +741,13 @@
     let rule;
     if (v < 0) rule = Math.abs(v) > 0.6 || harsh ? 'ban' : pick(['tax', 'ration', 'license', 'ban'].filter((x) => rules.includes(x)));
     else rule = (Math.abs(v) > 0.75 && chance(SOCIAL.includes(b) ? 0.3 : harsh ? 0.35 : 0.1) && b !== 'leave') ? 'require' : S.treasury > 40 && chance(0.5) ? 'subsidise' : 'reward';
+    if (BEH[b].kind === 'subject') rule = v < 0 ? (Math.abs(v) > 0.6 || harsh ? 'ban' : 'discourage') : Math.abs(v) > 0.6 ? 'require' : 'reward';
     if (!rules.includes(rule)) rule = rules.includes('ban') && v < 0 ? 'ban' : 'reward';
     // who it is for
     let who = BEH[b].minAge >= 16 ? 'adults' : 'everyone';
-    if (chance(0.3)) {
+    if (b === 'retire') who = pick(['elders', 'over60', 'everyone']);
+    if (BEH[b].kind === 'subject') who = 'schools';
+    else if (chance(0.3)) {
       if (['naked', 'uniform', 'drink', 'outside', 'weapon', 'gamble', 'work', 'worship'].includes(b)) who = pick(['men', 'women']);
       else if (['trade', 'outside', 'organise'].includes(b)) who = 'newcomers';
       else if (b === 'study' && v > 0) who = 'children';
@@ -736,6 +764,7 @@
   }
   function softer(spec) {
     const s2 = { ...spec, name: CC.uniqueLawName(spec.name.replace(/^The /, 'The Lesser ')) };
+    if (BEH[spec.beh].kind === 'subject') { if (spec.rule === 'require') { s2.rule = 'reward'; return s2; } if (spec.rule === 'ban') { s2.rule = 'discourage'; return s2; } return null; }
     if (RULES[spec.rule].violation) {
       const i = PUN_BY_SEV.indexOf(spec.pun);
       if (i <= 1) { if (spec.rule === 'require') { s2.rule = 'reward'; } else if (CC.rulesFor(spec.beh).includes('tax')) { s2.rule = 'tax'; s2.amount = 2; } else return null; }
@@ -751,7 +780,8 @@
     const cands = npcFree().filter((c) => c.age >= 18 && c.id !== proposerId).map((c) => ({ c, v: CC.desires(c)[spec.beh] || 0 })).filter((x) => Math.sign(x.v) === -Math.sign(dir) && Math.abs(x.v) >= 0.3).sort((a, b) => Math.abs(b.v) - Math.abs(a.v));
     if (!cands.length) return null;
     const c = cands[0].c;
-    const rule = dir < 0 ? (S.treasury > 40 && chance(0.4) ? 'subsidise' : 'reward') : (Math.abs(cands[0].v) > 0.6 && CC.rulesFor(spec.beh).includes('ban') ? 'ban' : CC.rulesFor(spec.beh).includes('tax') ? 'tax' : 'ban');
+    let rule = dir < 0 ? (S.treasury > 40 && chance(0.4) ? 'subsidise' : 'reward') : (Math.abs(cands[0].v) > 0.6 && CC.rulesFor(spec.beh).includes('ban') ? 'ban' : CC.rulesFor(spec.beh).includes('tax') ? 'tax' : 'ban');
+    if (BEH[spec.beh].kind === 'subject') rule = dir < 0 ? 'reward' : Math.abs(cands[0].v) > 0.6 ? 'ban' : 'discourage';
     const cs = { name: aiLawName(spec.beh, rule), who: spec.who, rule, beh: spec.beh, amount: 2, enf: 'watch', pun: 'fine', method: 'firing', setting: 'private', proposedBy: c.id };
     return { spec: cs, by: c.id, say: sayFor(spec.beh, rule) };
   }
@@ -1238,6 +1268,45 @@
       if (pull > stay) { c.party = mine.id; return `${c.first} joined ${mine.name}${theirs ? `, leaving ${theirs.name}` : ''}.`; }
       c.opinion = clamp(c.opinion + 2, -100, 100);
       return `${c.first} said no${theirs ? `; they're sticking with ${theirs.name}` : ' for now'}.`;
+    },
+  };
+  A.disbandParty = {
+    label: 'Disband your party', ap: 1, check: () => freeMe() || need(partyOf(player()) && partyOf(player()).leader === PLAYER, 'You do not lead a party.'),
+    run: () => {
+      const p = partyOf(player());
+      const mem = members(p).filter((c) => !c.isPlayer);
+      p.dissolved = true;
+      for (const c of members(p)) c.party = null;
+      player().party = null;
+      for (const c of mem) c.opinion = clamp(c.opinion - (c.friends.includes(PLAYER) ? 4 : 10), -100, 100);
+      log(`You disbanded ${p.name}.`, 'politics');
+      return `You disbanded ${p.name}. ${mem.length ? `Its ${mem.length} other member${mem.length === 1 ? ' is' : 's are'} on their own now, and not all of them are happy about it.` : ''}`;
+    },
+  };
+  // why a party can't be outlawed (or null if it can)
+  function outlawBlock(p) {
+    if (!p || p.dissolved) return 'No such party.';
+    if (player().party === p.id) return "That's your own party.";
+    if (p.outlawed) return 'It is already outlawed.';
+    const lead = P(S.gov.leader);
+    if (lead && !lead.isPlayer && lead.party === p.id) return 'They are the ruling party.';
+    if (S.gov.type === 'council' && S.gov.council.filter((id) => P(id) && P(id).party === p.id).length >= 3) return 'They hold a majority on the council.';
+    if (members(p).length > adultsHere().length / 2) return 'Most adults are members.';
+    return null;
+  }
+  CC.outlawBlock = (id) => outlawBlock(partyById(id));
+  A.outlawParty = {
+    label: 'Try to outlaw this party', ap: 1,
+    check: ({ party }) => freeMe() || outlawBlock(partyById(party)) || need(leaderIsPlayer() || demo(), 'Only the ruler can outlaw a party here. Petition them, or take power.'),
+    run: ({ party, pun }) => {
+      const p = partyById(party), R = S.report;
+      const spec = { name: CC.uniqueLawName(`The ${p.name.replace(/^The /, '')} Ban`), who: 'party:' + p.id, rule: 'ban', beh: 'organise', enf: CC.wardenCount() ? 'wardens' : 'watch', pun: CC.PUN[pun] ? pun : 'fine', method: 'firing', setting: 'private', outlaws: p.id, by: PLAYER };
+      const L = CC._laws.buildLaw(spec);
+      for (const c of members(p)) if (!c.isPlayer) { c.opinion = clamp(c.opinion - 15, -100, 100); c.grudges[PLAYER] = (c.grudges[PLAYER] || 0) + 10; }
+      if (leaderIsPlayer() || S.gov.type === 'assembly' || S.gov.council.includes(PLAYER)) return decideLaw(L, PLAYER, R).text;
+      const sponsor = S.gov.council.map(P).filter((c) => c && c.status === 'free' && c.party !== p.id).map((c) => ({ c, s: CC.supportFor(c, L) + c.opinion * 0.3 + c.lobby })).sort((a, b) => b.s - a.s)[0];
+      if (!sponsor || sponsor.s < 10) return 'No councillor would put it forward. Word has got round that you tried.';
+      return `${sponsor.c.first} put it to the council. ${decideLaw(L, sponsor.c.id, R).text}`;
     },
   };
   A.leaveParty = { label: 'Leave your party', ap: 1, check: () => freeMe() || need(player().party != null, 'You are not in a party.'), run: () => { const p = partyOf(player()); if (p && p.leader === PLAYER) p.leader = null; player().party = null; return `You left ${p ? p.name : 'your party'}.`; } };

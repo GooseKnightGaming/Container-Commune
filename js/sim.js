@@ -95,8 +95,10 @@
       party: null, founder: !!o.founder, arrived: o.arrived != null ? o.arrived : S.day, bornHere: !!o.bornHere,
       licenses: [], lawSupport: {}, plot: null, bias: {}, today: [], why: [], history: [], life: {}, expecting: 0,
       edu: o.edu != null ? o.edu : rnd() * 50, novote: 0, isPlayer: !!o.isPlayer, retired: age >= 65, lobby: 0, bribed: 0, smeared: 0, armed: false,
+      trans: !!o.trans, questioning: false, closeted: false, vmod: {}, taught: {},
     };
     for (const b of Object.keys(BEH)) c.bias[b] = (rnd() - 0.5) * 2;
+    if (!c.isPlayer && o.trans == null && age >= 16) { const r = rnd(); if (r < 0.03) c.trans = true; else if (r < 0.05) c.questioning = true; }
     if (c.age >= 65 && !o.trade) c.trade = pick(['gardener', 'cook', 'artist', 'teacher']);
     S.people.push(c);
     return c;
@@ -175,7 +177,7 @@
     return WHO.everyone;
   }
   function whoOptions() {
-    const out = Object.entries(WHO).map(([k, v]) => ({ key: k, label: v.label }));
+    const out = Object.entries(WHO).filter(([, v]) => !v.subjectOnly).map(([k, v]) => ({ key: k, label: v.label }));
     for (const t of CC.TRADE_LIST) out.push({ key: 'trade:' + t, label: CC.TRADES[t].plural });
     for (const p of S.parties.filter((x) => !x.dissolved)) out.push({ key: 'party:' + p.id, label: `Members of ${p.name}` });
     return out;
@@ -243,7 +245,8 @@
     const B = BEH[L.beh];
     switch (L.rule) {
       case 'ban': return `may not ${B.label}`;
-      case 'require': return B.kind === 'life' ? `must ${B.label} within a year` : `must ${B.label} every day`;
+      case 'require': return B.kind === 'subject' ? `must ${B.label}` : L.beh === 'retire' ? 'must retire' : B.kind === 'life' ? `must ${B.label} within a year` : `must ${B.label} every day`;
+      case 'discourage': return `are discouraged from ${B.ing || B.label}`;
       case 'ration':
         if (L.beh === 'child') return 'may have only one child';
         if (L.beh === 'partner') return 'may form only one partnership in their life';
@@ -252,8 +255,8 @@
         return `may ${B.label} only once a day`;
       case 'license': return `need a ${CC.LICENSE_FEE}-scrip permit to ${B.act || B.label}`;
       case 'tax': return `pay ${L.amount} scrip in tax each time they ${B.act || B.label}`;
-      case 'subsidise': return `are paid ${L.amount} scrip each time they ${B.act || B.label}`;
-      case 'reward': return `are publicly honoured when they ${B.act || B.label}`;
+      case 'subsidise': return L.beh === 'retire' ? `are paid a pension of ${L.amount} scrip a day once they retire` : `are paid ${L.amount} scrip each time they ${B.act || B.label}`;
+      case 'reward': return B.kind === 'subject' ? `are encouraged to ${B.label}` : `are publicly honoured when they ${B.act || B.label}`;
     }
     return '';
   }
@@ -268,7 +271,8 @@
   }
   function rulesFor(b) {
     const B = BEH[b];
-    return Object.keys(RULES).filter((r) => !(B.kind === 'life' && (r === 'tax' || r === 'subsidise' || r === 'reward') && b === 'leave') && !((b === 'leave' || b === 'samesex') && r === 'ration'));
+    if (B.kind === 'subject') return ['require', 'ban', 'reward', 'discourage'];
+    return Object.keys(RULES).filter((r) => r !== 'discourage' && !(B.kind === 'life' && (r === 'tax' || r === 'subsidise' || r === 'reward') && b === 'leave') && !((b === 'leave' || b === 'samesex' || b === 'retire' || b === 'transition') && r === 'ration'));
   }
 
   // ───────────────────────── wants and views ─────────────────────────
@@ -307,6 +311,9 @@
   }
   function lifeLike(c, b) {
     let u = 0;
+    if (BEH[b].kind === 'subject') return 0;
+    if (b === 'retire') { u = (c.age - 63) * 4 + (c.health < 60 ? 15 : 0) + (has(c, 'Lazy') ? 15 : 0) - (has(c, 'Diligent') ? 15 : 0) + (c.scrip > 30 ? 5 : 0); if (c.age < 50) u = Math.min(u, -20); }
+    if (b === 'transition') u = c.trans || c.questioning ? 45 : -25;
     if (b === 'samesex') { u = c.orient === 'gay' ? 40 : c.orient === 'bi' ? 12 : -30; if (has(c, 'Romantic') && c.orient !== 'straight') u += 8; }
     if (b === 'polygamy') { u = -18 + (has(c, 'Romantic') ? 22 : 0) + (c.motive === 'self' ? 6 : 0) + (has(c, 'Rebellious') ? 6 : 0) - (has(c, 'Family-minded') ? 10 : 0); }
     if (b === 'divorce') {
@@ -330,6 +337,7 @@
   function valueOf(c, b) {
     let v = BEH[b].value;
     for (const t of c.traits) if (TRAITS[t].values && TRAITS[t].values[b] !== undefined) v = TRAITS[t].values[b];
+    if (c.vmod && c.vmod[b]) v = clamp(v + c.vmod[b], -1.5, 1.2);
     return v;
   }
   function avgLike(b) {
@@ -348,8 +356,8 @@
     if (c.motive === 'believed') { const own = clamp(likeOf(c, b) / 40, -1, 1.5); return (truth * c.accuracy + (own + c.bias[b]) * (100 - c.accuracy)) / 100; }
     return 0;
   }
-  const IDENTITY = ['samesex', 'polygamy', 'divorce'];
-  const POLICY_BEH = DAY_BEH.concat(['partner', 'samesex', 'polygamy', 'divorce', 'child']);
+  const IDENTITY = ['samesex', 'polygamy', 'divorce', 'transition', 'retire'];
+  const POLICY_BEH = DAY_BEH.concat(['partner', 'samesex', 'polygamy', 'divorce', 'child', 'retire', 'transition'], CC.SUBJECTS);
   function desires(c) {
     if (c._dd === S.day && c._des) return c._des;
     const d = {};
@@ -374,7 +382,7 @@
     let own = B.kind === 'day' ? clamp(likeOf(c, b) / 40, -1, 1.5) : clamp(lifeLike(c, b) / 40, -1, 1.5);
     // not wanting to do something yourself is no reason to ban it for others who do
     // and not wanting it yourself is no reason to object when others are honoured for it, unless you'd be made to
-    if ((b === 'samesex' || b === 'polygamy' || b === 'divorce') && L.rule !== 'require') own = Math.max(0, own);
+    if (IDENTITY.includes(b) && L.rule !== 'require') own = Math.max(0, own);
     const others = othersView(c, b);
     const V = valueOf(c, b);
     const selfW = c.motive === 'self' ? 1.5 : 0.6;
@@ -395,7 +403,15 @@
       if (L.enf === 'watch') s += has(c, 'Busybody') ? 10 : -3;
     }
     const restrictive = R.dir < 0;
-    const targeted = L.who !== 'everyone' && L.who !== 'adults';
+    // parents of school-age children care most about what schools teach
+    if (B.kind === 'subject' && c.children.some((k) => { const x = P(k); return x && alive(x) && x.age >= 5 && x.age < 16; })) s += R.dir * V * 16;
+    if (L.outlaws != null) {
+      s -= has(c, 'Idealist') ? 25 : 12;
+      if ((has(c, 'Paranoid') || has(c, 'Loyal')) && c.party !== L.outlaws) s += 14;
+      const pa = S.parties.find((p) => p.id === L.outlaws);
+      if (pa && c.party != null && c.party !== L.outlaws) s += agreement(c, pa.stance) < -0.1 ? 12 : 0;
+    }
+    const targeted = L.who !== 'everyone' && L.who !== 'adults' && L.who !== 'schools';
     if (targeted) {
       if (mine && restrictive) s -= 15;
       if (!mine && restrictive && c.motive === 'self') s += 4;
@@ -469,7 +485,13 @@
   }
   CC.lawNameIssue = lawNameIssue; CC.uniqueLawName = uniqueLawName;
   function buildLaw(spec) {
+    if (BEH[spec.beh] && BEH[spec.beh].kind === 'subject') {
+      spec = { ...spec, who: 'schools' };
+      spec.rule = { tax: 'discourage', ration: 'ban', license: 'ban', subsidise: 'reward' }[spec.rule] || spec.rule || 'require';
+    } else if (spec.who === 'schools') spec = { ...spec, who: 'everyone' };
+    if (spec.rule === 'discourage' && !(BEH[spec.beh] && BEH[spec.beh].kind === 'subject')) spec = { ...spec, rule: 'tax' };
     return {
+      outlaws: spec.outlaws != null ? spec.outlaws : null,
       id: S.nextLawId, name: (spec.name || '').trim() || 'Unnamed Act', who: spec.who || 'everyone', rule: spec.rule || 'ban', beh: spec.beh || 'music',
       enf: spec.enf || 'wardens', pun: spec.pun || 'fine', amount: spec.amount || 3, method: spec.method || 'firing', setting: spec.setting || 'private',
       from: S.day + 1, passedDay: S.day, by: spec.by != null ? spec.by : S.gov.leader, proposedBy: spec.proposedBy != null ? spec.proposedBy : null, brokenToday: 0, caughtToday: 0, brokenTotal: 0,
@@ -483,6 +505,16 @@
     const pop = lawPopularity(L);
     if (pop.pct < 30) S.legitimacy = clamp(S.legitimacy - 3, 0, 100);
     if (L.pun === 'torture' || L.pun === 'execution') { S.legitimacy = clamp(S.legitimacy - 4, 0, 100); S.attention = clamp(S.attention + 3, 0, 100); }
+    if (L.outlaws != null) {
+      const pa = S.parties.find((p) => p.id === L.outlaws);
+      if (pa) {
+        pa.outlawed = true;
+        S.legitimacy = clamp(S.legitimacy - (CC.GOV[S.gov.type].demo ? 10 : 5), 0, 100); S.attention = clamp(S.attention + 3, 0, 100);
+        for (const c of here()) if (!c.isPlayer && c.party === pa.id) { blame(c, -25); c.grudge_regime = c.grudge_regime || has(c, 'Idealist') || has(c, 'Rebellious'); }
+        if (R) R.headlines.push(`${pa.name} has been outlawed. Its members must give up party work or face ${punText(L)}.`);
+        log(`${pa.name} was outlawed.`, 'politics');
+      }
+    }
     const trap = conflictsFor(L).filter((x) => x.kind === 'clash');
     if (trap.length && S.gov.conflict === 'both') { S.legitimacy = clamp(S.legitimacy - 10, 0, 100); log(`“${L.name}” and “${trap[0].law.name}” can't both be obeyed. Word is spreading.`, 'law'); }
     else if (trap.length) log(`“${L.name}” clashes with “${trap[0].law.name}”. “${trap[0].winner.name}” wins where they overlap.`, 'law');
@@ -504,6 +536,8 @@
     S.repealed = S.repealed || [];
     S.repealed.push({ ...L, repealedDay: S.day, repealedBy: by != null ? by : null, text: describeLaw(L) });
     if (S.repealed.length > 40) S.repealed.shift();
+    if (L.outlaws != null) { const pa = S.parties.find((p) => p.id === L.outlaws); if (pa && pa.outlawed) { pa.outlawed = false; log(`${pa.name} is legal again.`, 'politics'); if (R) R.headlines.push(`${pa.name} is a legal party again.`); } }
+    if (L.beh === 'transition' && L.rule === 'ban') for (const c of here()) if (c.closeted && !S.laws.some((M) => M !== L && M.beh === 'transition' && M.rule === 'ban')) { c.closeted = false; }
     log(`“${L.name}” was repealed.`, 'law');
     if (R) R.politics.push(`“${L.name}” was repealed.`);
   }
@@ -516,6 +550,7 @@
     for (const L of S.laws) {
       if (L.beh !== b || !governs(L, c)) continue;
       if (L.rule === 'tax') { const pay = Math.min(c.scrip, L.amount); c.scrip -= pay; S.treasury += pay; if (pay) notes.push(`paid ${money(pay)} scrip tax under “${L.name}”`); }
+      if (L.rule === 'subsidise' && b === 'retire') continue;
       if (L.rule === 'subsidise') {
         if (S.treasury >= L.amount) { c.scrip += L.amount; S.treasury -= L.amount; notes.push(`got ${L.amount} scrip under “${L.name}”`); }
         else { if (!c.isPlayer) c.govt -= 1; S._unpaid = (S._unpaid || 0) + 1; notes.push(`should have been paid under “${L.name}”, but the treasury is short`); }
@@ -948,6 +983,7 @@
     S.materials = Math.max(0, S.materials);
     S._heal = prod.heal;
     R.stats.food = Math.round(prod.food + 2); R.stats.water = Math.round(rain + prod.water); R.stats.mat = Math.round(prod.mat); R.stats.upkeep = Math.round(upkeep);
+    pensions(R);
     R.stats.wages = Math.round(S._wages || 0); R.stats.unpaid = S._unpaidShifts || 0; R.stats.salary = S._salaryPaid;
   }
 
@@ -1169,8 +1205,10 @@
         R.life.push(`${c.first} came of age and became a ${CC.TRADES[c.trade].label}.`);
         log(`${c.first} ${c.last} came of age.`, 'life');
       }
-      if (before < 65 && after >= 65) { c.retired = true; R.life.push(`${c.first} turned 65 and is taking things easier.`); }
+      if (before < 16 && after >= 16) { comingOfAge(c, R); if (chance(0.03)) c.questioning = true; }
     }
+    retireTick(R);
+    transitionTick(R);
     // leaving
     leaving(R);
     // newcomers at the gate
@@ -1192,6 +1230,9 @@
       let want = leaveWant(c);
       if (S.laws.some((L) => L.beh === 'leave' && L.rule === 'require' && governs(L, c))) want += 60;
       if (CC.inSameSex(c) && S.laws.some((L) => L.beh === 'samesex' && L.rule === 'ban' && governs(L, c))) want += 22;
+      if ((c.trans || c.questioning) && S.laws.some((L) => L.beh === 'transition' && L.rule === 'ban' && governs(L, c))) want += c.closeted ? 26 : 18;
+      if (c.retired && S.laws.some((L) => L.beh === 'retire' && L.rule === 'ban' && governs(L, c))) want += 6;
+      if (c.party != null && S.parties.some((p) => p.id === c.party && p.outlawed)) want += 6;
       if (c.orient === 'gay' && S.laws.some((L) => L.beh === 'samesex' && L.rule === 'ban' && governs(L, c) && PUN[L.pun].sev >= 40)) want += 10;
       if (c.orient === 'straight' && S.laws.some((L) => L.beh === 'samesex' && L.rule === 'require' && governs(L, c))) want += 18;
       for (const L of S.laws) if (applies(L, c) && RULES[L.rule].violation && PUN[L.pun].sev >= 70 && (c.lawSupport[L.id] || 0) < -40) want += 15;
@@ -1355,6 +1396,7 @@
     const before = { approval: approval(), legit: S.legitimacy, fear: avgFear(), standing: standing() };
     recomputeSupport();
     dayActions(R);
+    schoolDay(R);
     justice(R);
     economy(R);
     if (!S.over) nightLife(R);
@@ -1400,12 +1442,157 @@
       if (L.rule !== 'require' || BEH[L.beh].kind !== 'life' || !active(L)) continue;
       for (const c of free()) {
         if (!governs(L, c)) continue;
-        const did = L.beh === 'partner' ? partnersOf(c).length > 0 : L.beh === 'child' ? c.children.some((k) => P(k) && S.day - P(k).arrived < YEAR + 1)
+        if (L.beh === 'retire' || BEH[L.beh].kind === 'subject') continue;
+        const did = L.beh === 'transition' ? !!c.trans && !c.closeted : L.beh === 'partner' ? partnersOf(c).length > 0 : L.beh === 'child' ? c.children.some((k) => P(k) && S.day - P(k).arrived < YEAR + 1)
           : L.beh === 'samesex' ? CC.inSameSex(c) : L.beh === 'polygamy' ? partnersOf(c).length >= 2 : L.beh === 'divorce' ? c.lastDivorce != null && S.day - c.lastDivorce <= YEAR : false;
         if (!did && L.beh !== 'leave') { if (c.isPlayer && leaderIsPlayer()) continue; applyPunishment(c, L.pun, { why: `for not obeying “${L.name}” this year`, how: 'named in the census', method: L.method, setting: L.setting, R }); }
         if (L.beh === 'leave' && !c.isPlayer && chance(0.5)) { c.status = 'fled'; R.headlines.push(`${c.first} left, as “${L.name}” requires.`); }
       }
     }
+  }
+
+  // ───────────────────────── schools ─────────────────────────
+  // Teachers decide what to teach, within the law (or not). Children who attend lessons absorb it.
+  function subjectLaw(sub) { return S.laws.filter((L) => L.beh === sub && active(L)).sort((a, b) => b.id - a.id)[0] || null; }
+  CC.subjectLaw = subjectLaw;
+  function schoolDay(R) {
+    const teachers = npcFree().filter((c) => c.trade === 'teacher' && c.age >= 16 && c.today.includes('work'));
+    const pupils = npcFree().filter((c) => c.age >= 6 && c.age < 16 && c.today.includes('study'));
+    S.taught = {};
+    S._schoolDefy = [];
+    for (const sub of CC.SUBJECTS) {
+      const L = subjectLaw(sub);
+      let taught = false;
+      for (const t of teachers) {
+        const d = desires(t)[sub] || 0;
+        let does;
+        if (!L) does = d > 0.15 || (BEH[sub].value >= 0.5 && d > -0.2);
+        else if (L.rule === 'require') does = !(d < -0.6 && chance(0.35));
+        else if (L.rule === 'ban') does = d > 0.6 && chance(0.35);
+        else if (L.rule === 'reward') does = d > -0.35;
+        else does = d > 0.55;
+        if (L && RULES[L.rule].violation && ((L.rule === 'require' && !does) || (L.rule === 'ban' && does))) {
+          L.brokenToday++; L.brokenTotal++;
+          S._schoolDefy.push(t.first);
+          if (chance(catchRate(L) + 0.15)) { L.caughtToday++; applyPunishment(t, L.pun, { why: `for ${L.rule === 'ban' ? BEH[sub].ing : 'refusing to teach ' + BEH[sub].short.toLowerCase()} against “${L.name}”`, how: 'caught', method: L.method, setting: L.setting, R }); }
+        }
+        if (does) taught = true;
+      }
+      S.taught[sub] = taught;
+      if (!taught || !pupils.length) continue;
+      for (const k of pupils) {
+        k.taught = k.taught || {}; k.vmod = k.vmod || {};
+        k.taught[sub] = (k.taught[sub] || 0) + 1;
+        const nudge = (b, d) => { k.vmod[b] = clamp((k.vmod[b] || 0) + d, -0.8, 0.8); };
+        if (sub === 'teach_religion') { nudge('worship', 0.01); nudge('drink', -0.005); }
+        if (sub === 'teach_relations') { nudge('samesex', 0.006); nudge('divorce', 0.004); }
+        if (sub === 'teach_gender') nudge('transition', 0.01);
+        if (sub === 'teach_politics') { nudge('criticise', 0.008); nudge('organise', 0.008); nudge('protest', 0.004); }
+        if (sub === 'teach_loyalty') { k.govt = clamp(k.govt + 0.6, -100, 100); nudge('criticise', -0.01); nudge('uniform', 0.008); }
+        if (sub === 'teach_outside') { nudge('outside', 0.008); nudge('leave', 0.005); }
+        if (sub === 'teach_trades') k.edu = clamp(k.edu + 0.3, 0, 100);
+        if (sub === 'teach_history') k.needs.belonging = clamp(k.needs.belonging + 2, 0, 100);
+      }
+      // parents notice
+      const parents = new Set();
+      for (const k of pupils) for (const pid of k.parents) parents.add(pid);
+      for (const pid of parents) {
+        const p = P(pid);
+        if (!p || p.isPlayer || p.status !== 'free') continue;
+        const v = valueOf(p, sub);
+        if (v < -0.5) blame(p, -0.3); else if (v > 0.5) blame(p, 0.15);
+      }
+    }
+    if (S._schoolDefy.length && chance(0.5)) R.justice.push(`${list([...new Set(S._schoolDefy)])} defied the law on what schools teach.`);
+  }
+  function comingOfAge(c, R) {
+    const t = c.taught || {};
+    const gain = (trait, p) => { if (c.traits.includes(trait) || !chance(p)) return; const clash = [['Loyal', 'Rebellious'], ['Loyal', 'Cynic'], ['Idealist', 'Cynic']].find(([a, b]) => (trait === a && c.traits.includes(b)) || (trait === b && c.traits.includes(a))); if (clash) return; if (c.traits.length >= 2) c.traits[1] = trait; else c.traits.push(trait); };
+    if ((t.teach_religion || 0) > 30) gain('Devout', 0.3);
+    if ((t.teach_loyalty || 0) > 30) { gain('Loyal', 0.35); c.govt = clamp(c.govt + 10, -100, 100); }
+    if ((t.teach_politics || 0) > 30) gain('Idealist', 0.3);
+    if ((t.teach_outside || 0) > 30) gain('Rebellious', 0.2);
+    if ((t.teach_trades || 0) > 30) c.edu = clamp(c.edu + 10, 0, 100);
+    if ((t.teach_history || 0) > 30) c.opinion = clamp(c.opinion + 5, -100, 100);
+  }
+  CC.comingOfAge = comingOfAge;
+
+  // ───────────────────────── retirement and transition ─────────────────────────
+  function retireTick(R) {
+    for (const c of npcFree()) {
+      if (c.age < 50) continue;
+      const laws = S.laws.filter((L) => L.beh === 'retire' && active(L) && governs(L, c));
+      const ban = laws.find((L) => L.rule === 'ban');
+      if (!c.retired) {
+        if (c.age < 55 && !laws.some((L) => L.rule === 'require')) continue;
+        if (laws.some((L) => L.rule === 'require')) { if (chance(0.3)) { c.retired = true; R.life.push(`${c.first} retired, as the law requires.`); } continue; }
+        let deter = 0;
+        for (const L of laws) {
+          if (L.rule === 'ban') deter += deterrent(c, L);
+          if (L.rule === 'license' && !c.licenses.includes(L.id)) { if (c.scrip >= CC.LICENSE_FEE) { c.licenses.push(L.id); c.scrip -= CC.LICENSE_FEE; S.treasury += CC.LICENSE_FEE; } else deter += deterrent(c, L); }
+          if (L.rule === 'tax') deter += L.amount * 3;
+          if (L.rule === 'subsidise') deter -= L.amount * 4;
+          if (L.rule === 'reward') deter -= 10;
+        }
+        if (lifeLike(c, 'retire') + rnd() * 20 - deter > 30 && chance(0.08)) {
+          c.retired = true;
+          lawMoney(c, 'retire');
+          R.life.push(`${c.first} has retired${ban ? ', against the law' : ''}.`);
+          if (ban) punishLife(c, ban, R, 'retiring');
+        }
+      } else if (ban) {
+        if (chance(catchRate(ban) * 0.05)) applyPunishment(c, ban.pun, { why: `for staying retired against “${ban.name}”`, how: 'found out', method: ban.method, setting: ban.setting, R });
+        else if (chance(deterrent(c, ban) / 400)) { c.retired = false; R.life.push(`${c.first} went back to work, as “${ban.name}” demands.`); }
+      }
+    }
+  }
+  const NEW_NAME = (c, sex) => { const pool = sex === 'm' ? CC.FIRST_M : sex === 'f' ? CC.FIRST_F : CC.FIRST_X; const used = new Set(S.people.filter(alive).map((x) => x.first)); return pick(pool.filter((n) => !used.has(n))) || c.first; };
+  function transitionTick(R) {
+    for (const c of npcFree()) {
+      if (c.age < 16) continue;
+      const laws = S.laws.filter((L) => L.beh === 'transition' && active(L) && governs(L, c));
+      const ban = laws.find((L) => L.rule === 'ban');
+      if (c.questioning) {
+        let deter = 0;
+        for (const L of laws) {
+          if (L.rule === 'ban') deter += deterrent(c, L);
+          if (L.rule === 'license' && !c.licenses.includes(L.id)) { if (c.scrip >= CC.LICENSE_FEE) { c.licenses.push(L.id); c.scrip -= CC.LICENSE_FEE; S.treasury += CC.LICENSE_FEE; } else deter += deterrent(c, L); }
+          if (L.rule === 'tax') deter += L.amount * 3;
+          if (L.rule === 'subsidise') deter -= L.amount * 3;
+          if (L.rule === 'reward') deter -= 10;
+        }
+        if (!chance(0.02)) continue;
+        if (lifeLike(c, 'transition') + rnd() * 20 - deter <= 0) { c.needs.freedom -= 10; continue; }
+        const old = c.first, from = c.sex;
+        c.sex = from === 'x' ? (chance(0.5) ? 'm' : 'f') : chance(0.12) ? 'x' : from === 'm' ? 'f' : 'm';
+        c.trans = true; c.questioning = false;
+        if (chance(0.7)) c.first = NEW_NAME(c, c.sex);
+        lawMoney(c, 'transition');
+        R.life.push(`${old === c.first ? c.first : `${old}, now ${c.first},`} has come out as ${c.sex === 'x' ? 'non-binary' : c.sex === 'm' ? 'a trans man' : 'a trans woman'}${ban ? ', against the law' : ''}.`);
+        log(`${old} ${c.last} came out as ${c.sex === 'x' ? 'non-binary' : c.sex === 'm' ? 'a trans man' : 'a trans woman'}${old === c.first ? '' : ' and is now ' + c.first}.`, 'life');
+        for (const p of livePartners(c)) if (!p.isPlayer && !attracted(p, c)) { p.grudges[c.id] = (p.grudges[c.id] || 0) + 12; }
+        for (const x of here()) if (!x.isPlayer && x !== c && c.friends.includes(x.id)) { const v = valueOf(x, 'transition'); if (v < -0.5) x.grudges[c.id] = (x.grudges[c.id] || 0) + 8; }
+        if (ban) punishLife(c, ban, R, 'transitioning');
+        continue;
+      }
+      if (c.trans && ban && !c.closeted) {
+        if (chance(catchRate(ban) * 0.05)) applyPunishment(c, ban.pun, { why: `for living as ${c.sex === 'x' ? 'non-binary' : 'a ' + CC.SEX[c.sex]} against “${ban.name}”`, how: 'found out', method: ban.method, setting: ban.setting, R });
+        else if (chance(deterrent(c, ban) / 600)) { c.closeted = true; R.life.push(`${c.first} has stopped living openly, for fear of “${ban.name}”.`); }
+      }
+      if (c.closeted) { c.needs.freedom = clamp(c.needs.freedom - 6, 0, 100); c.needs.belonging = clamp(c.needs.belonging - 3, 0, 100); if (!ban) c.closeted = false; }
+    }
+  }
+  // pensions are paid every day
+  function pensions(R) {
+    let paid = 0, short = 0;
+    for (const c of free()) {
+      if (!c.retired) continue;
+      for (const L of S.laws) if (L.beh === 'retire' && L.rule === 'subsidise' && active(L) && governs(L, c)) {
+        if (S.treasury >= L.amount) { S.treasury -= L.amount; c.scrip += L.amount; paid += L.amount; } else short++;
+      }
+    }
+    if (paid) R.stats.pensions = paid;
+    if (short) R.headlines.push(`The treasury couldn't pay ${short} pension${short === 1 ? '' : 's'} today.`);
   }
 
   // The order buildings were fitted out in, so the yard map keeps everything where it was.
