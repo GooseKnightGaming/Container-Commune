@@ -137,6 +137,7 @@
     const me = P(CC.PLAYER);
     h += '<div class="stack">';
     h += `<section class="panel"><h2>Your day <span class="r mono">${S.ap} of ${S.apMax} actions left</span></h2>`;
+    if (S.apLost && me.status === 'free') h += `<p class="small warnline">${esc(`You lost ${S.apLost.n} action${S.apLost.n === 1 ? '' : 's'} today: ${S.apLost.why.join(', ')}.`)}</p>`;
     if (me.status === 'detained') h += `<p class="lead">You are in the lock-up for ${me.detained} more day${me.detained === 1 ? '' : 's'}. You can only wait.</p>`;
     h += S.dayNotes.length ? `<ul class="notes">${S.dayNotes.map((n) => `<li>${esc(n)}</li>`).join('')}</ul>` : '<p class="empty">Nothing yet today. Click anyone in the yard to act on them, or use the buttons below.</p>';
     h += '<div class="quick" style="margin-top:12px">';
@@ -279,6 +280,7 @@
       <div class="doors"></div><div class="body"><div class="nm">${esc(name(c))}</div><div class="role">${Math.floor(c.age)} · ${sexWord(c)} · ${c.age < 16 ? 'child' : esc(c.isPlayer ? (isLeader() ? 'leader' : 'citizen') : (CC.TRADES[c.trade] ? CC.TRADES[c.trade].label : c.trade))}${c.retired ? ' (retired)' : ''}</div>
       <div class="tags">${tags.join('')}</div>${mini}<div class="did">${esc(did)}</div></div>${gone}</button>`;
   }
+  const cap = (t) => t.charAt(0).toUpperCase() + t.slice(1);
   const regime = (c) => (isLeader() ? c.opinion : c.govt);
   const leaderIsP = () => S.gov.leader === CC.PLAYER;
   const sexWord = (c) => (c.age < 16 ? (CC.SEX_KID[c.sex] || 'child') : c.trans && c.sex !== 'x' ? 'trans ' + CC.SEX[c.sex] : CC.SEX[c.sex] || '');
@@ -364,29 +366,45 @@
   }
   const opt = (pairs, sel) => pairs.map(([k, l, dis]) => `<option value="${esc(k)}"${k === sel ? ' selected' : ''}${dis ? ' disabled' : ''}>${esc(l)}</option>`).join('');
   const WAGES = [0, 1, 2, 3, 4, 5, 8], SALARIES = [0, 2, 5, 10, 20];
+  const APPROACH = {
+    ban: ['Ban it', 'Anyone who does it can be punished.'],
+    require: ['Require it', 'Anyone who doesn’t can be punished.'],
+    ration: ['Limit it', 'Allowed, but only so often.'],
+    license: ['Permit only', `People need a ${CC.LICENSE_FEE}-scrip permit first.`],
+    tax: ['Tax it', 'Allowed, but it costs them each time.'],
+    subsidise: ['Pay for it', 'The treasury pays them each time.'],
+    reward: ['Honour it', 'Public praise: people feel good about doing it.'],
+    discourage: ['Discourage it', 'No punishment; schools are told to avoid it.'],
+  };
   function builder() {
+    if (!draft.area || !CC.AREAS.some((a) => a.key === draft.area && a.beh.includes(draft.beh))) draft.area = CC.areaOf(draft.beh);
+    const area = CC.AREAS.find((a) => a.key === draft.area);
     const B = CC.BEH[draft.beh];
     const rules = CC.rulesFor(draft.beh);
     if (!rules.includes(draft.rule)) draft.rule = rules[0];
     const R = CC.RULES[draft.rule];
     const sub = B.kind === 'subject';
     if (sub) draft.who = 'schools'; else if (draft.who === 'schools') draft.who = 'everyone';
-    const ruleLabel = (r) => (sub ? { require: 'must', ban: 'may not', reward: 'are encouraged to', discourage: 'are discouraged from' } : { ban: 'may not', require: 'must', ration: B.kind === 'life' ? 'may only once' : 'may only once a day', license: 'need a permit to', tax: 'are taxed when they', subsidise: draft.beh === 'retire' ? 'get a daily pension when they' : 'are paid when they', reward: 'are honoured when they' })[r];
-    let s = `<select id="b-who" aria-label="Who">${opt(sub ? [['schools', 'Schools']] : CC.whoOptions().map((o) => [o.key, o.label]), draft.who)}</select> `;
-    s += `<select id="b-rule" aria-label="Rule">${opt(rules.map((r) => [r, ruleLabel(r)]), draft.rule)}</select> `;
-    const grp = (label, kind) => `<optgroup label="${label}">${opt(Object.keys(CC.BEH).filter((b) => CC.BEH[b].kind === kind).map((b) => [b, sub && kind === 'subject' && draft.rule === 'discourage' ? CC.BEH[b].ing : CC.BEH[b].label]), draft.beh)}</optgroup>`;
-    s += `<select id="b-beh" aria-label="Behaviour">${grp('Everyday life', 'day')}${grp('Life events', 'life')}${grp('What schools teach', 'subject')}</select>`;
-    if (R.money) s += `, <select id="b-amount" aria-label="Amount">${opt([1, 2, 3, 5, 10].map((n) => [String(n), `${n} scrip`]), String(draft.amount))}</select> a time`;
+    if (draft.autoName !== false) draft.name = CC.suggestLawName(draft.beh, draft.rule);
+    const chip = (attr, val, label, on, title) => `<button type="button" class="lchip${on ? ' on' : ''}" data-${attr}="${esc(val)}" aria-pressed="${on}"${title ? ` title="${esc(title)}"` : ''}>${esc(label)}</button>`;
+    let h = '<div class="lb">';
+    h += `<div class="lbstep"><div class="lbh"><span class="lbn">1</span>Policy area</div><div class="lchips">${CC.AREAS.map((a) => chip('larea', a.key, a.label, a.key === draft.area, a.desc)).join('')}</div><p class="small muted">${esc(area.desc)}</p></div>`;
+    h += `<div class="lbstep"><div class="lbh"><span class="lbn">2</span>About</div><div class="lchips">${area.beh.map((b) => chip('lbeh', b, CC.BEH[b].kind === 'subject' ? CC.BEH[b].short : cap(CHIP[b] || b), b === draft.beh)).join('')}</div></div>`;
+    h += `<div class="lbstep"><div class="lbh"><span class="lbn">3</span>What the law does</div><div class="lchips">${rules.map((r) => chip('lrule', r, r === 'subsidise' && draft.beh === 'retire' ? 'Pay a pension' : r === 'reward' && sub ? 'Encourage it' : APPROACH[r][0], r === draft.rule)).join('')}</div><p class="small muted">${esc(draft.rule === 'subsidise' && draft.beh === 'retire' ? 'The treasury pays retired people every day.' : draft.rule === 'reward' && sub ? 'Schools are told to teach it; no punishment.' : APPROACH[draft.rule][1])}</p></div>`;
+    h += `<div class="lbstep"><div class="lbh"><span class="lbn">4</span>Who it applies to</div>${sub ? '<p class="small">Schools: the law binds the teachers.</p>' : `<select id="b-who" class="plain" aria-label="Who">${opt(CC.whoOptions().map((o) => [o.key, o.label]), draft.who)}</select>`}</div>`;
+    let n = 5;
+    if (R.money) h += `<div class="lbstep"><div class="lbh"><span class="lbn">${n++}</span>${draft.rule === 'tax' ? 'Tax' : draft.beh === 'retire' ? 'Pension per day' : 'Payment'}</div><div class="lchips">${[1, 2, 3, 5, 10].map((v) => chip('lamt', v, `${v} scrip`, Number(draft.amount) === v)).join('')}</div></div>`;
     if (R.violation) {
-      s += `, enforced by <select id="b-enf" aria-label="Enforcement">${opt(Object.entries(CC.ENF).map(([k, v]) => [k, v.label + (v.needs && !S.inst[v.needs] ? ' (not set up)' : '')]), draft.enf)}</select>`;
-      s += `, punished by <select id="b-pun" aria-label="Punishment">${opt(Object.entries(CC.PUN).map(([k, v]) => [k, v.label]), draft.pun)}</select>`;
-      if (draft.pun === 'execution') s += ` by <select id="b-method" aria-label="Method">${opt(Object.entries(CC.METHODS), draft.method)}</select> <select id="b-setting" aria-label="Where">${opt(Object.entries(CC.SETTINGS), draft.setting)}</select>`;
+      h += `<div class="lbstep"><div class="lbh"><span class="lbn">${n++}</span>Enforcement and punishment</div><div class="lbpair">`;
+      h += `<label class="field"><span>Enforced by</span><select id="b-enf" class="plain">${opt(Object.entries(CC.ENF).map(([k, v]) => [k, v.label + (v.needs && !S.inst[v.needs] ? ' (not set up)' : '')]), draft.enf)}</select></label>`;
+      h += `<label class="field"><span>Punished by</span><select id="b-pun" class="plain">${opt(Object.keys(CC.PUN).sort((a, b) => CC.PUN[a].sev - CC.PUN[b].sev).map((k) => [k, CC.PUN[k].label]), draft.pun)}</select></label>`;
+      if (draft.pun === 'execution') h += `<label class="field"><span>Method</span><select id="b-method" class="plain">${opt(Object.entries(CC.METHODS), draft.method)}</select></label><label class="field"><span>Where</span><select id="b-setting" class="plain">${opt(Object.entries(CC.SETTINGS), draft.setting)}</select></label>`;
+      h += '</div></div>';
     }
-    s += '.';
     const issue = CC.lawNameIssue(draft.name);
-    let h = `<label class="field" style="margin-bottom:10px"><span>Name</span><input id="b-name" class="plain${issue ? ' invalid' : ''}" type="text" maxlength="48" value="${escRaw(draft.name)}" aria-describedby="b-namewarn"${issue ? ' aria-invalid="true"' : ''}></label><div id="b-namewarn" class="namewarn" role="status"${issue ? '' : ' hidden'}>${esc(issue || '')}</div>`;
-    h += `<div class="sentence">${s}</div>`;
-    h += `<p class="small muted" style="margin:-4px 0 8px">In full: ${esc(CC.describeLaw(CC._laws.buildLaw({ ...draft })))}</p>`;
+    h += `<div class="lbstep"><div class="lbh"><span class="lbn">${n++}</span>Name</div><div class="row"><input id="b-name" class="plain${issue ? ' invalid' : ''}" style="flex:1;min-width:180px" type="text" maxlength="48" value="${escRaw(draft.name)}" aria-label="Name of the law" aria-describedby="b-namewarn"${issue ? ' aria-invalid="true"' : ''}><button type="button" class="btn small" id="b-suggest">Suggest a name</button></div><div id="b-namewarn" class="namewarn" role="status"${issue ? '' : ' hidden'}>${esc(issue || '')}</div></div>`;
+    h += '</div>';
+    h += `<div class="sentence lbfull"><span class="small muted mono">THE LAW READS</span><br>“${esc(draft.name)}”: ${esc(CC.describeLaw(CC._laws.buildLaw({ ...draft })))}</div>`;
     h += `<div class="forecast">${forecast()}</div>`;
     const label = isLeader() ? (demo() ? `Put it to the ${S.gov.type === 'council' ? 'council' : 'assembly'}` : 'Decree this law') : S.gov.type === 'council' ? 'Ask a councillor to propose it' : S.gov.type === 'assembly' ? 'Put it to the assembly' : 'Petition the ruler';
     h += `<div class="row">${abtn('proposeLaw', { spec: { ...draft } }, label, 'primary')}</div>`;
@@ -406,7 +424,7 @@
       ['Open Hearts Charter', { who: 'adults', rule: 'reward', beh: 'polygamy' }],
       ['Sacred Bond Act', { who: 'everyone', rule: 'ban', beh: 'divorce', enf: 'wardens', pun: 'bigfine' }],
     ];
-    h += `<div class="presets" style="margin-top:12px"><span>Examples:</span>${PRE.map(([n], i) => `<button type="button" data-preset="${i}">${esc(n)}</button>`).join('')}</div>`;
+    h += `<div class="presets" style="margin-top:12px"><span>Or start from an example:</span>${PRE.map(([n], i) => `<button type="button" data-preset="${i}">${esc(n)}</button>`).join('')}</div>`;
     builder.PRE = PRE;
     return h;
   }
@@ -694,16 +712,21 @@
     const fb = root.querySelector('#foundbtn'); if (fb) fb.addEventListener('click', () => { act('found', { name: viewPolitics.pname || '' }); viewPolitics.pname = ''; });
     // law builder
     const bind = (id, key, num) => { const el = root.querySelector('#' + id); if (el) el.addEventListener('change', () => { draft[key] = num ? Number(el.value) : el.value; refreshBuilder(); }); };
-    bind('b-who', 'who'); bind('b-rule', 'rule'); bind('b-beh', 'beh'); bind('b-amount', 'amount', true); bind('b-enf', 'enf'); bind('b-pun', 'pun'); bind('b-method', 'method'); bind('b-setting', 'setting');
+    bind('b-who', 'who'); bind('b-enf', 'enf'); bind('b-pun', 'pun'); bind('b-method', 'method'); bind('b-setting', 'setting');
+    root.querySelectorAll('[data-larea]').forEach((b) => b.addEventListener('click', () => { const a = CC.AREAS.find((x) => x.key === b.dataset.larea); draft.area = a.key; if (!a.beh.includes(draft.beh)) draft.beh = a.beh[0]; refreshBuilder(); }));
+    root.querySelectorAll('[data-lbeh]').forEach((b) => b.addEventListener('click', () => { draft.beh = b.dataset.lbeh; refreshBuilder(); }));
+    root.querySelectorAll('[data-lrule]').forEach((b) => b.addEventListener('click', () => { draft.rule = b.dataset.lrule; refreshBuilder(); }));
+    root.querySelectorAll('[data-lamt]').forEach((b) => b.addEventListener('click', () => { draft.amount = Number(b.dataset.lamt); refreshBuilder(); }));
+    const sg = root.querySelector('#b-suggest'); if (sg) sg.addEventListener('click', () => { draft.autoName = true; refreshBuilder(); });
     const bn = root.querySelector('#b-name'); if (bn) bn.addEventListener('input', () => {
-      draft.name = bn.value;
+      draft.name = bn.value; draft.autoName = false;
       const issue = CC.lawNameIssue(draft.name);
       bn.classList.toggle('invalid', !!issue); if (issue) bn.setAttribute('aria-invalid', 'true'); else bn.removeAttribute('aria-invalid');
       const w = root.querySelector('#b-namewarn'); if (w) { w.hidden = !issue; w.textContent = issue || ''; }
       const btn = root.querySelector('[data-act="proposeLaw"]');
       if (btn) { btn.dataset.args = JSON.stringify({ spec: { ...draft } }); const why = CC.can('proposeLaw', { spec: { ...draft } }); btn.disabled = !!why; if (why) btn.title = why; else btn.removeAttribute('title'); }
     });
-    root.querySelectorAll('[data-preset]').forEach((b) => b.addEventListener('click', () => { const [n, spec] = builder.PRE[Number(b.dataset.preset)]; Object.assign(draft, { amount: 3, enf: 'watch', pun: 'fine', method: 'firing', setting: 'private' }, spec, { name: CC.lawNameIssue(n) ? CC.uniqueLawName(n) : n }); refreshBuilder(); }));
+    root.querySelectorAll('[data-preset]').forEach((b) => b.addEventListener('click', () => { const [n, spec] = builder.PRE[Number(b.dataset.preset)]; Object.assign(draft, { amount: 3, enf: 'watch', pun: 'fine', method: 'firing', setting: 'private' }, spec, { name: CC.lawNameIssue(n) ? CC.uniqueLawName(n) : n, autoName: false, area: CC.areaOf(spec.beh) }); refreshBuilder(); }));
     root.querySelectorAll('[data-const]').forEach((b) => b.addEventListener('click', () => {
       const k = b.dataset.const; const el = root.querySelector('#c-' + k);
       let v = el.value; if (k === 'tax' || k === 'term' || k === 'wage' || k === 'salary') v = Number(v); if (k === 'exempt') v = v === 'true';

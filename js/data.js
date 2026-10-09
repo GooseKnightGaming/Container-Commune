@@ -7,7 +7,7 @@
   'use strict';
   const CC = (root.CC = root.CC || {});
   CC.inSameSex = (c) => { const S = CC.S; if (!S) return false; const ps = [c.partner, ...(c.extra || [])].filter((x) => x != null).map((id) => S.people[id]); return ps.some((p) => p && p.sex === c.sex && c.sex !== 'x' && (p.status === 'free' || p.status === 'detained')); };
-  CC.VERSION = 'V3';
+  CC.VERSION = 'V4';
   CC.YEAR = 24;                       // days in a year (4 seasons of 6 days)
   CC.SEASONS = ['Spring', 'Summer', 'Autumn', 'Winter'];
   CC.ADULT = 16;                      // age of majority: can work, vote and stand
@@ -66,6 +66,17 @@
   for (const k in CC.BEH) { CC.BEH[k].kind = CC.BEH[k].kind || 'day'; CC.BEH[k].maxAge = CC.BEH[k].maxAge || 200; }
   CC.DAY_BEH = Object.keys(CC.BEH).filter((k) => CC.BEH[k].kind === 'day');
   CC.SUBJECTS = Object.keys(CC.BEH).filter((k) => CC.BEH[k].kind === 'subject');
+  /* POLICY AREAS: how the law builder groups behaviours */
+  CC.AREAS = [
+    { key: 'labour', label: 'Work and money', desc: 'Shifts, trade, gambling, retirement and pensions.', beh: ['work', 'trade', 'gamble', 'retire'] },
+    { key: 'family', label: 'Families and relationships', desc: 'Partnerships, same-sex couples, polygamy, divorce, children, gender identity.', beh: ['partner', 'samesex', 'polygamy', 'divorce', 'child', 'transition'] },
+    { key: 'education', label: 'Education', desc: 'Lessons, and what schools must, may not, should or shouldn\u2019t teach.', beh: ['study', ...CC.SUBJECTS] },
+    { key: 'welfare', label: 'Welfare and community', desc: 'Sharing food, water, care work and meetings.', beh: ['share', 'hoard', 'volunteer', 'gather'] },
+    { key: 'order', label: 'Public order and justice', desc: 'Theft, weapons, drinking, noise, nudity, informing.', beh: ['steal', 'weapon', 'drink', 'music', 'naked', 'report'] },
+    { key: 'culture', label: 'Faith and culture', desc: 'Worship, the uniform, the leader\u2019s address.', beh: ['worship', 'uniform', 'address'] },
+    { key: 'politics', label: 'Politics and dissent', desc: 'Criticism, protest, party work, outsiders, leaving.', beh: ['criticise', 'protest', 'organise', 'outside', 'leave'] },
+  ];
+  CC.areaOf = (b) => (CC.AREAS.find((a) => a.beh.includes(b)) || CC.AREAS[0]).key;
 
   /* GROUPS a law can apply to. Party and trade groups are added at runtime. */
   CC.WHO = {

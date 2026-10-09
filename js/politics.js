@@ -535,6 +535,13 @@
     return CC.uniqueLawName(`The ${topic} ${kind}`);
   }
   CC.aiLawName = aiLawName;
+  // a sensible name for a law, without touching the game's dice
+  CC.suggestLawName = function (b, rule) {
+    const kind = { ban: 'Ban', require: 'Act', ration: 'Rule', license: 'Permit Act', tax: 'Levy', subsidise: b === 'retire' ? 'Scheme' : 'Grant', reward: 'Charter', discourage: 'Guidance' }[rule] || 'Act';
+    const title = (t) => t.replace(/\b([a-z])/g, (m) => m.toUpperCase()).replace(/\bIn\b/g, 'in').replace(/\bThe\b/g, 'the').replace(/\bTo\b/g, 'to');
+    const topic = RULES[rule] && RULES[rule].dir > 0 && TOPIC_POS[b] ? TOPIC_POS[b] : title(CC.NOUN[b] || BEH[b].short).replace(/^the /, '');
+    return CC.uniqueLawName(`The ${topic} ${kind}`);
+  };
   function aiGovern(R) {
     const lead = P(S.gov.leader);
     if (!lead || lead.isPlayer || lead.status !== 'free') return;

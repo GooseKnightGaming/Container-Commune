@@ -894,10 +894,10 @@
       case 'fine': case 'bigfine': {
         const amt = pun === 'fine' ? 10 : 30;
         if (me.scrip >= amt) { me.scrip -= amt; S.treasury += amt; R.justice.push(`${what}: fined ${amt} scrip.`); }
-        else { me.scrip = 0; S.apPenalty += 1; R.justice.push(`${what}: you couldn't pay, so tomorrow you lose an action to community service.`); }
+        else { me.scrip = 0; S.apPenalty += 1; (S.apWhy = S.apWhy || []).push('community service for an unpaid fine'); R.justice.push(`${what}: you couldn't pay, so tomorrow you lose an action to community service.`); }
         break;
       }
-      case 'service': S.apPenalty += 1; R.justice.push(`${what}: community service costs you an action tomorrow.`); break;
+      case 'service': S.apPenalty += 1; (S.apWhy = S.apWhy || []).push('community service'); R.justice.push(`${what}: community service costs you an action tomorrow.`); break;
       case 'shaming': for (const c of here()) if (!c.isPlayer) c.opinion = clamp(c.opinion - 5, -100, 100); R.justice.push(`${what}: shamed in front of the whole yard.`); break;
       case 'confiscate': me.scrip = 0; R.justice.push(`${what}: everything you owned was confiscated.`); break;
       case 'novote': me.novote = YEAR; R.justice.push(`${what}: you lost the vote for a year.`); break;
@@ -910,7 +910,7 @@
         for (const c of here()) if (!c.isPlayer && c.friends.includes(PLAYER)) c.govt = clamp(c.govt - 6, -100, 100);
         break;
       }
-      case 'flogging': me.health -= 40; S.apPenalty += 2; R.headlines.push(`${what}, and were flogged in the yard.`); for (const c of here()) if (!c.isPlayer) { c.opinion = clamp(c.opinion + 4, -100, 100); c.govt = clamp(c.govt - 3, -100, 100); } break;
+      case 'flogging': me.health -= 40; S.apPenalty += 2; (S.apWhy = S.apWhy || []).push('recovering from a flogging (2)'); R.headlines.push(`${what}, and were flogged in the yard.`); for (const c of here()) if (!c.isPlayer) { c.opinion = clamp(c.opinion + 4, -100, 100); c.govt = clamp(c.govt - 3, -100, 100); } break;
       case 'exile': CC.gameOver('exiled', `${what}, and were exiled from the commune.`); break;
       case 'execution': CC.gameOver('executed', `${what}, and were executed by ${CC.METHODS[ctx.method || 'firing']} ${CC.SETTINGS[ctx.setting || 'private']}.`); break;
       case 'disappear': CC.gameOver('executed', 'You were taken in the night and never seen again.'); break;
@@ -1394,14 +1394,15 @@
     CC.resolveDefaults();
     const R = (S.report = { day: S.day, headlines: [], justice: [], life: [], politics: [], mood: [], stats: {} });
     const before = { approval: approval(), legit: S.legitimacy, fear: avgFear(), standing: standing() };
-    recomputeSupport();
-    dayActions(R);
-    schoolDay(R);
-    justice(R);
-    economy(R);
-    if (!S.over) nightLife(R);
-    if (!S.over) CC.politics(R);
-    if (!S.over) updateOpinions(R, before);
+    const phase = (name, f) => { try { f(); } catch (e) { if (typeof console !== 'undefined') console.error(`Container Commune: ${name} failed`, e); log(`Something went wrong overnight (${name}). The day carried on.`, 'event'); } };
+    phase('support', recomputeSupport);
+    phase('the day', () => dayActions(R));
+    phase('schools', () => schoolDay(R));
+    phase('justice', () => justice(R));
+    phase('the economy', () => economy(R));
+    if (!S.over) phase('the night', () => nightLife(R));
+    if (!S.over) phase('politics', () => CC.politics(R));
+    if (!S.over) phase('opinions', () => updateOpinions(R, before));
     morning(R);
     syncBuilt();
     const pop = here().length;
@@ -1429,8 +1430,12 @@
     }
     S.apMax = 3 + own.aides;
     S.otToday = 0;
-    S.ap = me.status === 'free' ? Math.max(0, S.apMax - S.apPenalty) : 0;
-    S.apPenalty = 0;
+    // punishments can cost you actions, but never all of them while you're free
+    const lost = me.status === 'free' ? Math.min(S.apPenalty, S.apMax - 1) : 0;
+    S.ap = me.status === 'free' ? S.apMax - lost : 0;
+    S.apLost = me.status === 'free' && lost > 0 ? { n: lost, why: (S.apWhy || []).slice() } : me.status === 'detained' ? { n: S.apMax, why: [`you are in the lock-up for ${me.detained} more day${me.detained === 1 ? '' : 's'}`] } : null;
+    if (S.apLost) R.headlines.unshift(`You start today with ${S.ap} action${S.ap === 1 ? '' : 's'} instead of ${S.apMax}: ${S.apLost.why.join(', ')}.`);
+    S.apPenalty = 0; S.apWhy = [];
     me.wage = 0;
     for (const L of S.laws) if (L.from === S.day) R.headlines.push(`“${L.name}” is now in force.`);
     if (S.day % YEAR === 0) { R.headlines.push(`A new year begins: Year ${Math.floor(S.day / YEAR) + 1}.`); yearlyCensus(R); }
