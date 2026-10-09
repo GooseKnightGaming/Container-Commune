@@ -7,7 +7,7 @@
   'use strict';
   const CC = (root.CC = root.CC || {});
   CC.inSameSex = (c) => { const S = CC.S; if (!S) return false; const ps = [c.partner, ...(c.extra || [])].filter((x) => x != null).map((id) => S.people[id]); return ps.some((p) => p && p.sex === c.sex && c.sex !== 'x' && (p.status === 'free' || p.status === 'detained')); };
-  CC.VERSION = 'V4';
+  CC.VERSION = 'V5';
   CC.YEAR = 24;                       // days in a year (4 seasons of 6 days)
   CC.SEASONS = ['Spring', 'Summer', 'Autumn', 'Winter'];
   CC.ADULT = 16;                      // age of majority: can work, vote and stand
@@ -134,20 +134,36 @@
 
   /* PUNISHMENTS, mildest to harshest. sev 0-100. */
   CC.PUN = {
-    warning:   { label: 'a warning', sev: 3 },
-    fine:      { label: 'a fine of 10 scrip', sev: 12 },
-    bigfine:   { label: 'a fine of 30 scrip', sev: 22 },
-    service:   { label: 'community service', sev: 16 },
-    shaming:   { label: 'public shaming', sev: 26 },
-    confiscate:{ label: 'confiscation of everything they own', sev: 32 },
-    novote:    { label: 'loss of the vote for a year', sev: 20 },
-    detention: { label: 'two days in the lock-up', sev: 40 },
-    longdet:   { label: 'a week in the lock-up', sev: 55 },
-    exile:     { label: 'exile', sev: 70 },
-    flogging:  { label: 'flogging', sev: 75 },
-    torture:   { label: 'interrogation under torture', sev: 85 },
-    execution: { label: 'execution', sev: 100 },
+    warning:   { label: 'a warning', sev: 3, cat: 'warning' },
+    fine:      { label: 'a fine of 10 scrip', sev: 12, cat: 'fine' },
+    bigfine:   { label: 'a fine of 30 scrip', sev: 22, cat: 'fine' },
+    service:   { label: 'community service', sev: 16, cat: 'labour' },
+    shaming:   { label: 'public shaming', sev: 26, cat: 'humiliation' },
+    confiscate:{ label: 'confiscation of everything they own', sev: 32, cat: 'fine' },
+    novote:    { label: 'loss of the vote for a year', sev: 20, cat: 'rights' },
+    detention: { label: 'two days in the lock-up', sev: 40, cat: 'prison' },
+    longdet:   { label: 'a week in the lock-up', sev: 55, cat: 'prison' },
+    exile:     { label: 'exile', sev: 70, cat: 'exile' },
+    flogging:  { label: 'flogging', sev: 75, cat: 'corporal' },
+    torture:   { label: 'interrogation under torture', sev: 85, cat: 'torture' },
+    execution: { label: 'execution', sev: 100, cat: 'execution' },
   };
+  /* KINDS of punishment: you can invent new ones of any kind, or abolish a whole kind */
+  CC.PUN_CATS = {
+    warning:     { label: 'Warnings', one: 'a warning', base: 3, fixed: true },
+    fine:        { label: 'Fines and confiscation', one: 'a fine', base: 12 },
+    labour:      { label: 'Labour', one: 'labour', base: 16 },
+    rights:      { label: 'Loss of rights', one: 'loss of rights', base: 20 },
+    humiliation: { label: 'Public humiliation', one: 'a humiliation', base: 26 },
+    prison:      { label: 'Imprisonment', one: 'imprisonment', base: 40 },
+    exile:       { label: 'Exile', one: 'exile', base: 70 },
+    corporal:    { label: 'Corporal punishment', one: 'a beating', base: 76 },
+    mutilation:  { label: 'Amputation and mutilation', one: 'an amputation', base: 86 },
+    torture:     { label: 'Torture', one: 'torture', base: 88 },
+    execution:   { label: 'Execution', one: 'an execution', base: 100 },
+  };
+  CC.BODY_PARTS = ['a finger', 'a hand', 'an arm', 'a foot', 'a leg', 'an ear', 'an eye', 'the nose', 'the tongue'];
+  CC.HARSH_CATS = ['corporal', 'mutilation', 'torture', 'execution'];
   CC.METHODS = { firing: 'firing squad', hanging: 'hanging', injection: 'lethal injection' };
   CC.SETTINGS = { private: 'in private', public: 'in public, in the yard' };
 

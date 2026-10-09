@@ -36,6 +36,31 @@
   function blame(c, d) { c.govt = clamp(c.govt + d, -100, 100); if (leaderIsPlayer()) c.opinion = clamp(c.opinion + d, -100, 100); }
   function log(text, kind) { S.chronicle.push({ day: S.day, text, kind: kind || 'event' }); if (S.chronicle.length > 400) S.chronicle.shift(); }
   CC.isOfficial = (c) => c.trade === 'warden' || S.gov.council.includes(c.id) || S.gov.leader === c.id;
+  // ── punishments: kinds, inventions and abolition ──
+  const punCat = (k) => (PUN[k] ? PUN[k].cat : 'warning');
+  const isAbolished = (k) => { const ab = (S && S.gov && S.gov.abolished) || {}; return k !== 'warning' && !!PUN[k] && !!(ab[k] || ab[punCat(k)]); };
+  // the harshest punishment still legal that is milder than this one
+  function fallbackPun(k) {
+    const sev = PUN[k] ? PUN[k].sev : 0;
+    let best = 'warning';
+    for (const key of Object.keys(PUN)) if (!isAbolished(key) && PUN[key].sev < sev && PUN[key].sev > PUN[best].sev) best = key;
+    return best;
+  }
+  const legalPun = (k) => (isAbolished(k) ? fallbackPun(k) : k);
+  const punSetting = (L) => (PUN[L.pun] && PUN[L.pun].custom ? PUN[L.pun].setting || 'private' : L.setting);
+  // invented punishments live in the save and are added to the list of punishments
+  function registerPunishments(st) {
+    for (const k of Object.keys(PUN)) if (PUN[k].custom) delete PUN[k];
+    for (const x of (st && st.puns) || []) PUN[x.key] = { ...x, custom: true };
+  }
+  function commuteLaws(R) {
+    for (const L of S.laws) if (RULES[L.rule].violation && isAbolished(L.pun)) {
+      const was = PUN[L.pun].label; L.pun = fallbackPun(L.pun);
+      const t = `“${L.name}” now punishes with ${PUN[L.pun].label} instead of ${was}.`;
+      log(t, 'law'); if (R) R.politics.push(t);
+    }
+  }
+  Object.assign(CC, { punCat, isAbolished, fallbackPun, legalPun, punSetting, registerPunishments, commuteLaws });
   // partners: one main partner plus any extra partners (polygamy)
   const partnersOf = (c) => [c.partner, ...(c.extra || [])].filter((x) => x != null);
   const livePartners = (c) => partnersOf(c).map(P).filter((x) => x && alive(x));
@@ -262,7 +287,9 @@
   }
   function punText(L) {
     if (L.pun === 'execution') return `execution by ${CC.METHODS[L.method]}, ${CC.SETTINGS[L.setting]}`;
-    return PUN[L.pun].label;
+    const D = PUN[L.pun];
+    if (D && D.custom && (D.cat === 'execution' || D.cat === 'corporal' || D.cat === 'mutilation')) return `${D.label}, ${CC.SETTINGS[D.setting || 'private']}`;
+    return D ? D.label : 'a warning';
   }
   function describeLaw(L) {
     let s = `${whoInfo(L.who).label} ${ruleText(L)}`;
@@ -293,7 +320,7 @@
       case 'naked': if (Math.floor((S.day % YEAR) / (YEAR / 4)) === 3) u -= 14; if (c.age < 18) u -= 10; break;
       case 'study': if (c.age >= 16) u -= 12; if (S.buildings.school) u += 6; break;
       case 'trade': if (c.scrip < 10) u += 8; break;
-      case 'criticise': u += Math.max(0, -regimeOp(c)) * 0.4 + (c.plot != null ? 20 : 0); break;
+      case 'criticise': if (c.maimed && c.maimed.includes('the tongue')) u -= 40; u += Math.max(0, -regimeOp(c)) * 0.4 + (c.plot != null ? 20 : 0); break;
       case 'protest': u += Math.max(0, -regimeOp(c) - 15) * 0.6 + (S.rally && regimeOp(c) < -5 ? 45 : 0); break;
       case 'organise': u += c.party != null ? 26 : -12; break;
       case 'address': u += S.addressToday ? 24 : -80; u += regimeOp(c) * 0.15; break;
@@ -395,8 +422,9 @@
       const fair = Math.max(0, -V) * 40 + 12;
       const excess = PUN[L.pun].sev - fair;
       s -= Math.max(0, excess) * 0.45 * (has(c, 'Paranoid') ? 0.3 : 1) * (has(c, 'Busybody') ? 0.6 : 1) * (has(c, 'Loyal') ? 0.6 : 1);
-      if (L.pun === 'torture' || L.pun === 'execution' || L.pun === 'flogging') s -= has(c, 'Paranoid') ? 5 : 25;
-      if (L.pun === 'execution' && L.setting === 'public') s -= 10;
+      if (CC.HARSH_CATS.includes(punCat(L.pun))) s -= has(c, 'Paranoid') ? 5 : 25;
+      if (punCat(L.pun) === 'mutilation') s -= has(c, 'Hot-headed') ? 0 : 6;
+      if (CC.HARSH_CATS.includes(punCat(L.pun)) && punSetting(L) === 'public') s -= 10;
       if (L.enf === 'police') s += has(c, 'Paranoid') || has(c, 'Loyal') ? 10 : -20;
       if (L.enf === 'informants') s += has(c, 'Paranoid') ? 8 : -12;
       if (L.enf === 'cameras') s += has(c, 'Paranoid') ? 8 : -8;
@@ -493,7 +521,7 @@
     return {
       outlaws: spec.outlaws != null ? spec.outlaws : null,
       id: S.nextLawId, name: (spec.name || '').trim() || 'Unnamed Act', who: spec.who || 'everyone', rule: spec.rule || 'ban', beh: spec.beh || 'music',
-      enf: spec.enf || 'wardens', pun: spec.pun || 'fine', amount: spec.amount || 3, method: spec.method || 'firing', setting: spec.setting || 'private',
+      enf: spec.enf || 'wardens', pun: legalPun(PUN[spec.pun] ? spec.pun : 'fine'), amount: spec.amount || 3, method: spec.method || 'firing', setting: spec.setting || 'private',
       from: S.day + 1, passedDay: S.day, by: spec.by != null ? spec.by : S.gov.leader, proposedBy: spec.proposedBy != null ? spec.proposedBy : null, brokenToday: 0, caughtToday: 0, brokenTotal: 0,
     };
   }
@@ -504,7 +532,7 @@
     for (const c of here()) c.lawSupport[L.id] = supportFor(c, L);
     const pop = lawPopularity(L);
     if (pop.pct < 30) S.legitimacy = clamp(S.legitimacy - 3, 0, 100);
-    if (L.pun === 'torture' || L.pun === 'execution') { S.legitimacy = clamp(S.legitimacy - 4, 0, 100); S.attention = clamp(S.attention + 3, 0, 100); }
+    if (['torture', 'execution', 'mutilation'].includes(punCat(L.pun))) { S.legitimacy = clamp(S.legitimacy - 4, 0, 100); S.attention = clamp(S.attention + 3, 0, 100); }
     if (L.outlaws != null) {
       const pa = S.parties.find((p) => p.id === L.outlaws);
       if (pa) {
@@ -625,7 +653,7 @@
         switch (b) {
           case 'work': {
             shifts++; N.purpose += 30;
-            const half = c.retired ? 0.5 : 1;
+            const half = c.retired || (c.maimed && c.maimed.some((x) => /hand|arm|foot|leg/.test(x))) ? 0.5 : 1;
             payShift(c);
             switch (c.trade) {
               case 'gardener': prod.food += (prod.gardenUsed < gardenSlots ? 8 : 2) * half; prod.gardenUsed++; break;
@@ -803,16 +831,22 @@
   }
 
   // punish anyone (by law, by order, or after a plot)
+  const BASE = { warning: 'warning', fine: 'xfine', labour: 'labour', rights: 'novote', humiliation: 'shaming', prison: 'jail', exile: 'exile', corporal: 'flogging', mutilation: 'mutilate', torture: 'torture', execution: 'execution' };
   function applyPunishment(c, pun, ctx) {
     const R = ctx.R || S.report;
+    if (PUN[pun] && isAbolished(pun)) pun = fallbackPun(pun);
+    const sevOf = PUN[pun] ? PUN[pun].sev : 60;
+    if (PUN[pun] && PUN[pun].custom) { ctx = { ...ctx, custom: PUN[pun], setting: PUN[pun].setting || ctx.setting }; pun = BASE[PUN[pun].cat] || 'warning'; }
+    const X = ctx.custom;
     const tag = ctx.innocent ? ` (${Nm(c)} ${c.isPlayer ? 'were' : 'was'} innocent.)` : '';
     const what = `${Nm(c)} ${was(c)} ${ctx.how} ${ctx.why}`;
     if (c.isPlayer) return punishPlayer(pun, ctx, what, R);
+    void X;
     const friends = c.friends.map(P).filter((x) => x && x.status === 'free' && !x.isPlayer);
     const family = [c.partner, ...c.parents, ...c.children].map(P).filter((x) => x && x.status === 'free' && !x.isPlayer);
     const hurt = (who, amt) => who.forEach((x) => blame(x, -amt));
     const everyoneFear = (n) => here().forEach((x) => { x.fear = clamp(x.fear + n, 0, 100); });
-    if (ctx.innocent) { S.legitimacy = clamp(S.legitimacy - Math.max(0.5, PUN[pun].sev / 25), 0, 100); blame(c, -(6 + PUN[pun].sev / 5)); hurt(friends, 2 + PUN[pun].sev / 12); }
+    if (ctx.innocent) { S.legitimacy = clamp(S.legitimacy - Math.max(0.5, sevOf / 25), 0, 100); blame(c, -(6 + sevOf / 5)); hurt(friends, 2 + sevOf / 12); }
     if (c.age < 16) { S.legitimacy = clamp(S.legitimacy - 2, 0, 100); hurt(here().filter((x) => !x.isPlayer), 2); }
     switch (pun) {
       case 'warning': blame(c, -2); R.justice.push(`${what}: a warning.${tag}`); break;
@@ -823,7 +857,24 @@
         blame(c, -5); break;
       }
       case 'service': c.service = 1; blame(c, -6); R.justice.push(`${what}: community service tomorrow.${tag}`); break;
-      case 'shaming': c.needs.belonging -= 30; blame(c, -10); hurt(friends, 3); R.justice.push(`${what}: shamed in front of the whole yard.${tag}`); break;
+      case 'labour': c.service = X.days || 3; blame(c, -6 - (X.days || 3)); R.justice.push(`${what}: ${X.label}.${tag}`); break;
+      case 'xfine': {
+        const amt = X.amount || 20;
+        if (c.scrip >= amt) { c.scrip -= amt; S.treasury += amt; } else { S.treasury += c.scrip; c.scrip = 0; c.service = 1; }
+        blame(c, -5 - amt / 10); R.justice.push(`${what}: ${X.label}.${tag}`); break;
+      }
+      case 'jail': {
+        const days = X.days || 7;
+        c.status = 'detained'; c.detained = days; blame(c, -(15 + days)); hurt(friends, 5); hurt(family, 10); everyoneFear(2 + days / 4);
+        R.justice.push(`${what}: ${X.label}.${tag}`); break;
+      }
+      case 'mutilate': {
+        const part = X.part || 'a hand';
+        c.health -= 40; c.maimed = (c.maimed || []).concat(part); blame(c, -60); hurt(friends, 15); hurt(family, 30); everyoneFear(X.setting === 'public' ? 14 : 8);
+        S.legitimacy = clamp(S.legitimacy - 6, 0, 100); S.attention = clamp(S.attention + 4, 0, 100);
+        R.headlines.push(`${what}, and lost ${part}: ${X.label}, ${CC.SETTINGS[X.setting || 'private']}.${tag}`); log(`${c.first} ${c.last} lost ${part} ${ctx.why}.`, 'justice'); break;
+      }
+      case 'shaming': c.needs.belonging -= 30; blame(c, -10); hurt(friends, 3); R.justice.push(X ? `${what}: ${X.label}.${tag}` : `${what}: shamed in front of the whole yard.${tag}`); break;
       case 'confiscate': S.treasury += c.scrip; c.scrip = 0; blame(c, -18); hurt(family, 5); R.justice.push(`${what}: everything they owned was confiscated.${tag}`); break;
       case 'novote': c.novote = YEAR; blame(c, -12); R.justice.push(`${what}: lost the vote for a year.${tag}`); break;
       case 'detention': case 'longdet': {
@@ -837,7 +888,8 @@
         R.headlines.push(`${what}, and was exiled.${tag}`); log(`${c.first} ${c.last} was exiled ${ctx.why}.`, 'justice'); departFamily(c, R); break;
       case 'flogging':
         c.health -= 35; blame(c, -40); hurt(friends, 12); hurt(family, 25); everyoneFear(8); S.legitimacy = clamp(S.legitimacy - 4, 0, 100); S.attention = clamp(S.attention + 3, 0, 100);
-        R.headlines.push(`${what}, and was flogged in the yard.${tag}`); log(`${c.first} ${c.last} was flogged ${ctx.why}.`, 'justice'); break;
+        if (X && X.setting === 'public') everyoneFear(4);
+        R.headlines.push(X ? `${what}, and was punished: ${X.label}, ${CC.SETTINGS[X.setting || 'private']}.${tag}` : `${what}, and was flogged in the yard.${tag}`); log(`${c.first} ${c.last} was ${X ? 'punished with ' + X.label : 'flogged'} ${ctx.why}.`, 'justice'); break;
       case 'torture': {
         blame(c, -100); hurt(friends, 20); hurt(family, 40); everyoneFear(10); S.legitimacy = clamp(S.legitimacy - 6, 0, 100); S.attention = clamp(S.attention + 5, 0, 100);
         const pool = (ctx.vio || []).filter((v) => v.c !== c && v.c.status === 'free');
@@ -851,7 +903,7 @@
         // anyone in a plot may give the plot up
         if (c.plot != null && chance(0.7)) CC.exposePlot && CC.exposePlot(c.plot, R, 'under torture');
         c.status = 'detained'; c.detained = 3; c.health -= 25;
-        R.headlines.push(`${what} and interrogated under torture. ${c.first} named ${names.length ? list(names.map((m) => nm(m.x))) : 'nobody'}.${names.length ? ' (' + names.map((m) => `${Nm(m.x)} ${m.guilty ? (m.x.isPlayer ? 'had' : 'had') + ' broken a law' : (m.x.isPlayer ? 'were' : 'was') + ' innocent'}`).join('; ') + '.)' : ''}${tag}`);
+        R.headlines.push(`${what} and ${X ? 'tortured (' + X.label + ')' : 'interrogated under torture'}. ${c.first} named ${names.length ? list(names.map((m) => nm(m.x))) : 'nobody'}.${names.length ? ' (' + names.map((m) => `${Nm(m.x)} ${m.guilty ? (m.x.isPlayer ? 'had' : 'had') + ' broken a law' : (m.x.isPlayer ? 'were' : 'was') + ' innocent'}`).join('; ') + '.)' : ''}${tag}`);
         log(`${c.first} ${c.last} was interrogated under torture.`, 'justice');
         for (const m of names) {
           if (ctx.done && ctx.done.has(m.x.id)) continue;
@@ -869,7 +921,7 @@
         S.legitimacy = clamp(S.legitimacy - (pub ? 14 : 8), 0, 100); S.attention = clamp(S.attention + (pub ? 8 : 4), 0, 100);
         const loved = friends.filter((x) => (x.grudges[c.id] || 0) < 10);
         for (const x of loved) if (x.age >= 16 && chance(0.5)) x.grudge_regime = true;
-        R.headlines.push(`${what}, and was executed by ${CC.METHODS[ctx.method || 'firing']} ${CC.SETTINGS[ctx.setting || 'private']}.${tag}`);
+        R.headlines.push(X ? `${what}, and was ${X.label.startsWith('execution by ') ? 'executed by ' + X.label.slice(13) : 'put to death (' + X.label + ')'}, ${CC.SETTINGS[ctx.setting || 'private']}.${tag}` : `${what}, and was executed by ${CC.METHODS[ctx.method || 'firing']} ${CC.SETTINGS[ctx.setting || 'private']}.${tag}`);
         if (loved.length >= 2) R.headlines.push(`${list(loved.slice(0, 4).map((x) => x.first))} won't forget it.`);
         log(`${c.first} ${c.last} was executed ${ctx.why}.`, 'justice');
         widow(c, R);
@@ -889,7 +941,13 @@
   }
   function punishPlayer(pun, ctx, what, R) {
     const me = player();
+    const X = ctx.custom;
+    const lose = (n, why) => { S.apPenalty += n; (S.apWhy = S.apWhy || []).push(why); };
     switch (pun) {
+      case 'labour': lose(Math.min(2, X.days || 1), X.label); R.justice.push(`${what}: ${X.label}. It costs you actions tomorrow.`); break;
+      case 'xfine': { const amt = X.amount || 20; if (me.scrip >= amt) { me.scrip -= amt; S.treasury += amt; } else { me.scrip = 0; lose(1, 'community service for an unpaid fine'); } R.justice.push(`${what}: ${X.label}.`); break; }
+      case 'jail': me.status = 'detained'; me.detained = X.days || 7; R.headlines.push(`${what}: ${X.label}.`); log(`You were locked up ${ctx.why}.`, 'you'); break;
+      case 'mutilate': me.health -= 45; me.maimed = (me.maimed || []).concat(X.part || 'a hand'); lose(2, `recovering from losing ${X.part || 'a hand'} (2)`); R.headlines.push(`${what}, and you lost ${X.part || 'a hand'}: ${X.label}.`); log(`You lost ${X.part || 'a hand'} ${ctx.why}.`, 'you'); break;
       case 'warning': R.justice.push(`${what}: a warning.`); break;
       case 'fine': case 'bigfine': {
         const amt = pun === 'fine' ? 10 : 30;
@@ -910,9 +968,10 @@
         for (const c of here()) if (!c.isPlayer && c.friends.includes(PLAYER)) c.govt = clamp(c.govt - 6, -100, 100);
         break;
       }
-      case 'flogging': me.health -= 40; S.apPenalty += 2; (S.apWhy = S.apWhy || []).push('recovering from a flogging (2)'); R.headlines.push(`${what}, and were flogged in the yard.`); for (const c of here()) if (!c.isPlayer) { c.opinion = clamp(c.opinion + 4, -100, 100); c.govt = clamp(c.govt - 3, -100, 100); } break;
+      case 'flogging': if (X) { me.health -= 40; lose(2, `recovering from ${X.label} (2)`); R.headlines.push(`${what}, and were punished: ${X.label}.`); break; }
+        me.health -= 40; S.apPenalty += 2; (S.apWhy = S.apWhy || []).push('recovering from a flogging (2)'); R.headlines.push(`${what}, and were flogged in the yard.`); for (const c of here()) if (!c.isPlayer) { c.opinion = clamp(c.opinion + 4, -100, 100); c.govt = clamp(c.govt - 3, -100, 100); } break;
       case 'exile': CC.gameOver('exiled', `${what}, and were exiled from the commune.`); break;
-      case 'execution': CC.gameOver('executed', `${what}, and were executed by ${CC.METHODS[ctx.method || 'firing']} ${CC.SETTINGS[ctx.setting || 'private']}.`); break;
+      case 'execution': CC.gameOver('executed', X ? `${what}, and were ${X.label.startsWith('execution by ') ? 'executed by ' + X.label.slice(13) : 'put to death (' + X.label + ')'}.` : `${what}, and were executed by ${CC.METHODS[ctx.method || 'firing']} ${CC.SETTINGS[ctx.setting || 'private']}.`); break;
       case 'disappear': CC.gameOver('executed', 'You were taken in the night and never seen again.'); break;
     }
   }
@@ -1616,7 +1675,7 @@
   CC.syncBuilt = syncBuilt;
 
   // ───────────────────────── exports ─────────────────────────
-  CC.useState = (s) => { S = s; CC.S = s; if (CC._politicsUse) CC._politicsUse(s); };
+  CC.useState = (s) => { S = s; CC.S = s; registerPunishments(s); if (CC._politicsUse) CC._politicsUse(s); };
   CC.getState = () => S;
   Object.assign(CC, {
     endDay, approval, standing, avgFear, wellbeing, calendar, whoInfo, whoOptions, eligible, applies, active, governs, conflictsFor, catchRate,

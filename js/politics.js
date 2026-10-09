@@ -906,7 +906,8 @@
     plot: {
       make: (d) => {
         const ppl = plotPeople(d);
-        return { title: 'A plot against you', text: `It was uncovered ${d.how || 'by people loyal to you'}. The plotters: ${list(ppl.map((c) => c.first + ' ' + c.last))}.`, options: [{ key: 'pardon', label: 'Pardon them' }, { key: 'detain', label: 'Lock them up for a week' }, { key: 'exile', label: 'Exile them' }, { key: 'execute', label: 'Execute them' }], def: 'detain' };
+        const opts = [{ key: 'pardon', label: 'Pardon them' }, { key: 'detain', label: 'Lock them up for a week' }, { key: 'exile', label: 'Exile them' }, { key: 'execute', label: 'Execute them' }].filter((o) => !((o.key === 'detain' && CC.isAbolished('longdet')) || (o.key === 'exile' && CC.isAbolished('exile')) || (o.key === 'execute' && CC.isAbolished('execution'))));
+        return { title: 'A plot against you', text: `It was uncovered ${d.how || 'by people loyal to you'}. The plotters: ${list(ppl.map((c) => c.first + ' ' + c.last))}.`, options: opts, def: opts.some((o) => o.key === 'detain') ? 'detain' : 'pardon' };
       },
       resolve: (d, key) => {
         const ppl = plotPeople(d);
@@ -924,7 +925,7 @@
         if (key === 'accept' && L) {
           for (const c of here()) if (!c.isPlayer) c.opinion = clamp(c.opinion + 6, -100, 100);
           S.legitimacy = clamp(S.legitimacy + 6, 0, 100);
-          if (L.pun === 'execution' || L.pun === 'exile') { CC.gameOver(L.pun === 'exile' ? 'exiled' : 'executed', `You were caught breaking your own law, “${L.name}”, and accepted the punishment: ${CC.punText(L)}.`); return 'You accepted it.'; }
+          if (CC.punCat(L.pun) === 'execution' || CC.punCat(L.pun) === 'exile') { CC.gameOver(CC.punCat(L.pun) === 'exile' ? 'exiled' : 'executed', `You were caught breaking your own law, “${L.name}”, and accepted the punishment: ${CC.punText(L)}.`); return 'You accepted it.'; }
           CC.applyPunishment(player(), L.pun, { why: `for “${L.name}”`, how: 'caught', R: S.report, method: L.method, setting: L.setting });
           return 'You took your punishment like anyone else. People noticed.';
         }
@@ -1506,7 +1507,7 @@
     run: ({ id }) => { const c = P(id); c.status = 'free'; c.detained = 0; c.opinion = clamp(c.opinion + 20, -100, 100); for (const f of [c.partner, ...c.parents, ...c.children].map(P)) if (f && !f.isPlayer) f.opinion += 8; return `You released ${c.first}.`; },
   };
   A.arrest = {
-    label: 'Have them arrested', ap: 1, check: ({ id }) => freeMe() || lead() || need(target(id), 'They are not around.') || need(CC.wardenCount() > 0 || S.inst.police, 'You need wardens or a secret police.'),
+    label: 'Have them arrested', ap: 1, check: ({ id, how }) => freeMe() || lead() || need(how === 'secret' || !CC.isAbolished('detention'), 'Imprisonment has been abolished. You could still have them taken quietly.') || need(target(id), 'They are not around.') || need(CC.wardenCount() > 0 || S.inst.police, 'You need wardens or a secret police.'),
     run: ({ id, how }) => {
       const c = target(id);
       c.status = 'detained'; c.detained = 7; c.opinion = clamp(c.opinion - 30, -100, 100); c.govt = c.opinion;
@@ -1523,7 +1524,7 @@
     run: ({ id }) => { const c = P(id); CC.applyPunishment(c, 'disappear', { why: '', how: 'taken', R: S.report }); secret(`made ${c.first} disappear`, 25); return `${c.first} is gone.`; },
   };
   A.execute = {
-    label: 'Have them executed', ap: 1, check: ({ id }) => freeMe() || lead() || need(!demo(), 'Not while there is a council or assembly to answer to.') || need(P(id) && P(id).status === 'detained', 'Only someone already in the lock-up.'),
+    label: 'Have them executed', ap: 1, check: ({ id }) => freeMe() || lead() || need(!CC.isAbolished('execution'), 'Execution has been abolished. Restore it in the constitution first.') || need(!demo(), 'Not while there is a council or assembly to answer to.') || need(P(id) && P(id).status === 'detained', 'Only someone already in the lock-up.'),
     run: ({ id, setting }) => { const c = P(id); c.status = 'free'; CC.applyPunishment(c, 'execution', { why: 'on your orders', how: 'executed', setting: setting || 'private', method: 'firing', R: S.report }); S.legitimacy = clamp(S.legitimacy - 8, 0, 100); return `${c.first} ${c.last} was executed.`; },
   };
   A.rig = {
@@ -1622,6 +1623,12 @@
       case 'wage': return (ch.value - S.gov.wage) * 12 * (c.motive === 'self' ? 1.3 : 0.8) * (c.age >= 16 && !c.retired ? 1 : 0.4) - (S.treasury < 20 && ch.value > S.gov.wage ? 12 : 0) + (S.treasury < 0 && ch.value < S.gov.wage ? 6 : 0);
       case 'salary': return (S.gov.salary - ch.value) * 3 + (has(c, 'Loyal') ? 6 : 0) - 2;
       case 'currency': return 6 + (has(c, 'Rebellious') ? 4 : 0) - (has(c, 'Cynic') ? 8 : 0);
+      case 'abolish': {
+        const sev = CC.PUN_CATS[ch.value] ? CC.PUN_CATS[ch.value].base : PUN[ch.value] ? PUN[ch.value].sev : 50;
+        const v = (sev - 50) * 0.5 + (has(c, 'Idealist') ? 20 : 0) + (c.motive === 'others' ? 8 : 0) - (has(c, 'Paranoid') ? 22 : 0) - (has(c, 'Hot-headed') ? 14 : 0) - (has(c, 'Loyal') ? 4 : 0) - (has(c, 'Busybody') ? 6 : 0);
+        return ch.on === false ? -v : v;
+      }
+      case 'newpun': { const sev = ch.value && ch.value.sev || 50; return -(sev - 35) * 0.5 + (has(c, 'Paranoid') ? 16 : 0) + (has(c, 'Hot-headed') ? 12 : 0) - (has(c, 'Idealist') ? 20 : 0) - (c.motive === 'others' ? 8 : 0); }
     }
     return 0;
   };
@@ -1635,7 +1642,45 @@
     if (ch.kind === 'wage') S.gov.wage = ch.value;
     if (ch.kind === 'salary') S.gov.salary = ch.value;
     if (ch.kind === 'currency') S.currency = cleanCurrency(ch.value);
+    if (ch.kind === 'abolish') {
+      S.gov.abolished = S.gov.abolished || {};
+      const harsh = (CC.PUN_CATS[ch.value] ? CC.PUN_CATS[ch.value].base : PUN[ch.value] ? PUN[ch.value].sev : 0) >= 70;
+      if (ch.on === false) { delete S.gov.abolished[ch.value]; if (harsh) { S.legitimacy = clamp(S.legitimacy - 3, 0, 100); S.attention = clamp(S.attention + 2, 0, 100); } }
+      else { S.gov.abolished[ch.value] = true; CC.commuteLaws(S.report); if (harsh) { S.legitimacy = clamp(S.legitimacy + 4, 0, 100); S.attention = clamp(S.attention - 3, 0, 100); } }
+    }
+    if (ch.kind === 'newpun') {
+      const x = { ...ch.value, key: 'x_' + (S.nextPunId = (S.nextPunId || 0) + 1) };
+      S.puns = (S.puns || []).concat([x]);
+      CC.registerPunishments(S);
+      if (x.sev >= 76) { S.legitimacy = clamp(S.legitimacy - 3, 0, 100); S.attention = clamp(S.attention + 3, 0, 100); }
+    }
   }
+  // build an invented punishment from what the player typed and chose
+  CC.makePunishment = function (o) {
+    const cat = CC.PUN_CATS[o.cat] && o.cat !== 'warning' ? o.cat : 'humiliation';
+    const name = String(o.name || '').trim().replace(/\s+/g, ' ').slice(0, 40);
+    const part = CC.BODY_PARTS.includes(o.part) ? o.part : 'a hand';
+    const days = clamp(Math.round(Number(o.days) || 7), 1, 60);
+    const amount = clamp(Math.round(Number(o.amount) || 50), 1, 500);
+    const setting = o.setting === 'public' ? 'public' : 'private';
+    const low = (t) => (t && /^[A-Z][a-z]/.test(t) && !/^[A-Z][a-z]+ [A-Z]/.test(t) ? t.charAt(0).toLowerCase() + t.slice(1) : t);
+    let label = low(name);
+    if (!label) label = { fine: `a fine of ${amount} scrip`, labour: `${days} days of hard labour`, rights: 'loss of all rights', humiliation: 'a day in the stocks', prison: `${days} days in the lock-up`, exile: 'banishment', corporal: 'a beating', mutilation: `amputation of ${part}`, torture: 'torture', execution: 'death' }[cat];
+    if (cat === 'execution' && name && !/death|execution|execut/i.test(name)) label = `execution by ${low(name)}`;
+    if (cat === 'mutilation' && name && !/amput|cut|remov|lose|loss/i.test(name)) label = `${low(name)} (amputation of ${part})`;
+    if (cat === 'prison' && name) label = `${low(name)} (${days} days)`;
+    if (cat === 'labour' && name) label = `${low(name)} (${days} days)`;
+    if (cat === 'fine' && name) label = `${low(name)} (${amount} scrip)`;
+    let sev = CC.PUN_CATS[cat].base;
+    if (cat === 'prison') sev = clamp(36 + days * 1.2, 38, 80);
+    if (cat === 'labour') sev = clamp(14 + days * 1.5, 14, 45);
+    if (cat === 'fine') sev = clamp(10 + amount / 4, 10, 45);
+    if (cat === 'mutilation' && /finger|ear/.test(part)) sev = 80;
+    if (o.harsh === 'severe') sev = Math.min(cat === 'execution' ? 100 : 99, sev + 6);
+    if (o.harsh === 'mild') sev = Math.max(4, sev - 6);
+    if (cat === 'execution') sev = 100;
+    return { name: name || label.charAt(0).toUpperCase() + label.slice(1), label, cat, sev: Math.round(sev), part: cat === 'mutilation' ? part : undefined, days: cat === 'prison' || cat === 'labour' ? days : undefined, amount: cat === 'fine' ? amount : undefined, setting };
+  };
   function cleanCurrency(v) { return String(v || '').trim().replace(/\s+/g, ' ').slice(0, 20) || 'scrip'; }
   CC.cleanCurrency = cleanCurrency;
   function constLabel(ch) {
@@ -1648,11 +1693,16 @@
     if (ch.kind === 'wage') return ch.value ? `Wages of ${ch.value} scrip a shift` : 'No wages: work is unpaid';
     if (ch.kind === 'salary') return ch.value ? `A leader's salary of ${ch.value} scrip a day` : 'The leader takes no salary';
     if (ch.kind === 'currency') return `The currency is called “${cleanCurrency(ch.value)}”`;
+    if (ch.kind === 'abolish') { const nm2 = CC.PUN_CATS[ch.value] ? CC.PUN_CATS[ch.value].label.toLowerCase() : PUN[ch.value] ? PUN[ch.value].label : ch.value; return ch.on === false ? `Restore ${nm2}` : `Abolish ${nm2}`; }
+    if (ch.kind === 'newpun') return `Make ${ch.value ? ch.value.label : 'a new punishment'} a lawful punishment`;
     return '';
   }
   CC.constLabel = constLabel;
   A.amend = {
-    label: 'Amend the constitution', ap: 1, check: ({ change }) => freeMe() || lead() || need(!(change && change.kind === 'currency' && !String(change.value || '').trim()), 'Give the currency a name.'),
+    label: 'Amend the constitution', ap: 1, check: ({ change }) => freeMe() || lead() || need(!(change && change.kind === 'currency' && !String(change.value || '').trim()), 'Give the currency a name.')
+      || need(!(change && change.kind === 'abolish' && change.value === 'warning'), 'Warnings cannot be abolished.')
+      || need(!(change && change.kind === 'newpun' && Object.values(PUN).some((x) => x.label === change.value.label)), 'There is already a punishment like that.')
+      || need(!(change && change.kind === 'newpun' && S.gov.abolished && S.gov.abolished[change.value.cat]), `${change && change.value && CC.PUN_CATS[change.value.cat] ? CC.PUN_CATS[change.value.cat].label : 'That kind of punishment'} has been abolished. Restore it first.`),
     run: ({ change }) => {
       const label = constLabel(change);
       if (!demo()) {
@@ -1704,7 +1754,8 @@
       v: CC.VERSION, rs: (opts.seed >>> 0) || ((Date.now() & 0xffffffff) >>> 0) || 1, day: 0, startDay: 0, name: opts.communeName || 'Container Commune', start: opts.start,
       people: [], laws: [], nextLawId: 1, parties: [], nextPartyId: 1, plots: [], nextPlotId: 1, playerPlot: null, pending: [], nextEventId: 1,
       food: 90, water: 80, materials: 30, treasury: 50, containers: 4, buildings: {}, inst: { police: false, cameras: false },
-      gov: { type: 'founder', leader: PLAYER, council: [], term: 24, nextElection: null, conflict: 'newest', gate: 'vetted', tax: 0.1, exempt: false, since: 0, wage: CC.DEFAULT_WAGE, salary: CC.DEFAULT_SALARY },
+      gov: { type: 'founder', leader: PLAYER, council: [], term: 24, nextElection: null, conflict: 'newest', gate: 'vetted', tax: 0.1, exempt: false, since: 0, wage: CC.DEFAULT_WAGE, salary: CC.DEFAULT_SALARY, abolished: {} },
+      puns: [], nextPunId: 0,
       currency: 'scrip', repealed: [], owned: { aides: 0, guards: false, villa: false, clothes: false }, built: [], otToday: 0,
       legitimacy: 75, attention: 5, exposure: 0, secrets: [], sanctions: false, flags: {}, peakPop: 0,
       ap: 3, apMax: 3, apPenalty: 0, pdid: [], dayNotes: [], platform: {}, standing: false, campaign: 0, rigged: false, addressToday: false, rally: false,
@@ -1757,6 +1808,7 @@
       if (CC.CONFLICT[k.conflict]) s.gov.conflict = k.conflict;
       for (const f of ['tax', 'wage', 'salary', 'term']) if (typeof k[f] === 'number' && isFinite(k[f])) s.gov[f] = k[f];
       if (typeof k.exempt === 'boolean') s.gov.exempt = k.exempt;
+      for (const a of k.abolished || []) if (CC.PUN_CATS[a] && a !== 'warning') { s.gov.abolished[a] = true; if (CC.PUN_CATS[a].base >= 70) s.legitimacy = clamp(s.legitimacy + 2, 0, 100); }
       if (opts.currency) s.currency = cleanCurrency(opts.currency);
       if (s.gov.type === 'council' || s.gov.type === 'assembly') { s.gov.nextElection = Math.min(12, s.gov.term); s.standing = true; s.legitimacy = 82; }
       // a founding council sits until the first election: you and the four settlers who think most of you
@@ -1825,6 +1877,7 @@
     if (s.gov.wage == null) s.gov.wage = CC.DEFAULT_WAGE;
     if (s.gov.salary == null) s.gov.salary = CC.DEFAULT_SALARY;
     s.currency = s.currency || 'scrip'; s.repealed = s.repealed || []; s.otToday = s.otToday || 0;
+    s.gov.abolished = s.gov.abolished || {}; s.puns = s.puns || []; s.nextPunId = s.nextPunId || 0; CC.registerPunishments(s);
     s.owned = s.owned || { aides: 0, guards: false, villa: false, clothes: false };
     const sexOf = (n) => (CC.FIRST_M.includes(n) ? 'm' : CC.FIRST_F.includes(n) ? 'f' : chance(0.15) ? 'x' : chance(0.5) ? 'm' : 'f');
     for (const c of s.people) { if (!c.extra) c.extra = []; if (c.wage == null) c.wage = 0; if (!c.sex) c.sex = c.isPlayer ? 'm' : sexOf(c.first); }
