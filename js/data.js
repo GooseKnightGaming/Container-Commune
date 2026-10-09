@@ -6,7 +6,8 @@
 (function (root) {
   'use strict';
   const CC = (root.CC = root.CC || {});
-  CC.VERSION = 'V1';
+  CC.inSameSex = (c) => { const S = CC.S; if (!S) return false; const ps = [c.partner, ...(c.extra || [])].filter((x) => x != null).map((id) => S.people[id]); return ps.some((p) => p && p.sex === c.sex && c.sex !== 'x' && (p.status === 'free' || p.status === 'detained')); };
+  CC.VERSION = 'V2';
   CC.YEAR = 24;                       // days in a year (4 seasons of 6 days)
   CC.SEASONS = ['Spring', 'Summer', 'Autumn', 'Winter'];
   CC.ADULT = 16;                      // age of majority: can work, vote and stand
@@ -43,9 +44,13 @@
     address:   { label: "attend the leader's address", short: 'Heard the address', base: -10, needs: { belonging: 0.2 }, value: 0.3, minAge: 6 },
     volunteer: { label: 'care for the sick and elderly', short: 'Volunteered', base: 0, needs: { purpose: 0.5, belonging: 0.3 }, value: 1, minAge: 12 },
     outside:   { label: 'talk to outsiders', short: 'Talked to outsiders', base: -6, needs: { freedom: 0.4 }, value: -0.2, minAge: 16 },
-    partner:   { label: 'form a partnership', short: 'Partnered', kind: 'life', value: 0.6, minAge: 18 },
-    child:     { label: 'have a child', short: 'Had a child', kind: 'life', value: 0.5, minAge: 18, maxAge: 50 },
-    leave:     { label: 'leave the commune', short: 'Left', kind: 'life', value: -0.6, minAge: 16 },
+    naked:     { label: 'go about naked', short: 'Went naked', base: -16, needs: { freedom: 0.5 }, value: -0.4, minAge: 16 },
+    partner:   { label: 'form a partnership', act: 'form a partnership', short: 'Partnered', kind: 'life', value: 0.6, minAge: 18 },
+    samesex:   { label: 'be in a same-sex relationship', act: 'form a same-sex partnership', short: 'Same-sex partnership', kind: 'life', value: 0, minAge: 18 },
+    polygamy:  { label: 'take more than one partner', act: 'take another partner', short: 'Took another partner', kind: 'life', value: -0.3, minAge: 18 },
+    divorce:   { label: 'divorce their partner', act: 'divorce', short: 'Divorced', kind: 'life', value: -0.1, minAge: 18 },
+    child:     { label: 'have a child', act: 'have a child', short: 'Had a child', kind: 'life', value: 0.5, minAge: 18, maxAge: 50 },
+    leave:     { label: 'leave the commune', act: 'leave', short: 'Left', kind: 'life', value: -0.6, minAge: 16 },
   };
   for (const k in CC.BEH) { CC.BEH[k].kind = CC.BEH[k].kind || 'day'; CC.BEH[k].maxAge = CC.BEH[k].maxAge || 200; }
   CC.DAY_BEH = Object.keys(CC.BEH).filter((k) => CC.BEH[k].kind === 'day');
@@ -59,13 +64,22 @@
     newcomers:   { label: 'Newcomers (here under a year)', test: (c, S) => !c.founder && S.day - c.arrived < 24 && !c.bornHere, spec: 2 },
     founders:    { label: 'Founding members', test: (c) => c.founder, spec: 2 },
     notfounders: { label: 'Everyone except founders', test: (c) => !c.founder, spec: 1 },
-    partnered:   { label: 'Partnered citizens', test: (c) => c.partner != null, spec: 2 },
-    single:      { label: 'Single adults', test: (c) => c.partner == null && c.age >= 18, spec: 2 },
+    partnered:   { label: 'Partnered citizens', test: (c) => c.partner != null || (c.extra && c.extra.length > 0), spec: 2 },
+    single:      { label: 'Single adults', test: (c) => c.partner == null && !(c.extra && c.extra.length) && c.age >= 18, spec: 2 },
     parents:     { label: 'Parents', test: (c) => c.children.length > 0, spec: 2 },
     officials:   { label: 'Officials (council and wardens)', test: (c, S) => CC.isOfficial(c), spec: 2 },
     notofficials:{ label: 'Everyone except officials', test: (c, S) => !CC.isOfficial(c), spec: 1 },
     noparty:     { label: 'People in no party', test: (c) => c.party == null && c.age >= 16, spec: 2 },
+    men:         { label: 'Men', test: (c) => c.sex === 'm', spec: 2 },
+    women:       { label: 'Women', test: (c) => c.sex === 'f', spec: 2 },
+    nonbinary:   { label: 'Non-binary citizens', test: (c) => c.sex === 'x', spec: 3 },
+    samesexers:  { label: 'People in same-sex relationships', test: (c) => CC.inSameSex(c), spec: 3 },
   };
+  /* short nouns for behaviours, used in party platforms and speeches */
+  CC.NOUN = { work: 'work', study: 'lessons', share: 'sharing food', hoard: 'hoarding water', trade: 'private trade', gather: 'meetings', worship: 'worship', music: 'loud music', drink: 'drinking', gamble: 'gambling', criticise: 'criticism', report: 'informing', steal: 'theft', protest: 'protest', organise: 'party work', weapon: 'weapons', uniform: 'the uniform', address: "the leader's address", volunteer: 'care work', outside: 'talking to outsiders', naked: 'nudity', partner: 'partnerships', samesex: 'same-sex couples', polygamy: 'polygamy', divorce: 'divorce', child: 'having children', leave: 'leaving' };
+  CC.SEX = { m: 'man', f: 'woman', x: 'non-binary' };
+  CC.SEX_KID = { m: 'boy', f: 'girl', x: 'child' };
+  CC.ORIENT = { straight: 'straight', gay: 'gay', bi: 'bisexual' };
 
   /* RULES: what a law does to a behaviour. dir: how it pushes people (+ encourage, - discourage). */
   CC.RULES = {
@@ -112,20 +126,20 @@
   CC.TRAITS = {
     Diligent:        { likes: { work: 22, study: 10 } },
     Lazy:            { likes: { work: -22, drink: 10, music: 6, gamble: 6 } },
-    Devout:          { likes: { worship: 34, drink: -8, gamble: -10 }, values: { worship: 0.9, gamble: -1, drink: -0.8 } },
-    Rebellious:      { likes: { criticise: 22, music: 12, protest: 14, uniform: -20, address: -14 }, values: { criticise: 0.8, music: 0.5, protest: 0.6, leave: 0.5 } },
+    Devout:          { likes: { worship: 34, drink: -8, gamble: -10, naked: -30 }, values: { worship: 0.9, gamble: -1, drink: -0.8, naked: -1, samesex: -0.9, polygamy: -1, divorce: -1 } },
+    Rebellious:      { likes: { criticise: 22, music: 12, protest: 14, uniform: -20, address: -14, naked: 12 }, values: { criticise: 0.8, music: 0.5, protest: 0.6, leave: 0.5, naked: 0.3, samesex: 0.4, divorce: 0.4 } },
     Gossip:          { likes: { gather: 20, criticise: 5, report: 6, outside: 6 } },
     'Light-fingered':{ likes: { steal: 26, gamble: 8 } },
     Generous:        { likes: { share: 26, volunteer: 18 } },
     Busybody:        { likes: { report: 26 }, values: { report: 0.8 } },
     Paranoid:        { likes: { report: 16, weapon: 14 }, values: { criticise: -1, report: 0.8, weapon: 0.4 } },
     Ambitious:       { likes: { trade: 20, work: 8, organise: 14 } },
-    Timid:           { likes: { criticise: -22, protest: -24, weapon: -10 } },
+    Timid:           { likes: { criticise: -22, protest: -24, weapon: -10, naked: -14 } },
     'Hot-headed':    { likes: { drink: 14, criticise: 10, protest: 10, weapon: 10 } },
-    Romantic:        { likes: { gather: 6, music: 4 } },
-    'Family-minded': { likes: { volunteer: 6 }, values: { child: 1, partner: 0.9 } },
-    Loyal:           { likes: { uniform: 16, address: 16, criticise: -14 }, values: { uniform: 0.8, address: 0.6, criticise: -0.8, report: 0.4 } },
-    Idealist:        { likes: { organise: 22, protest: 8 }, values: { organise: 0.7, protest: 0.4 } },
+    Romantic:        { likes: { gather: 6, music: 4, naked: 4 }, values: { samesex: 0.5, polygamy: 0.2 } },
+    'Family-minded': { likes: { volunteer: 6 }, values: { child: 1, partner: 0.9, divorce: -0.6, polygamy: -0.5 } },
+    Loyal:           { likes: { uniform: 16, address: 16, criticise: -14, naked: -6 }, values: { uniform: 0.8, address: 0.6, criticise: -0.8, report: 0.4 } },
+    Idealist:        { likes: { organise: 22, protest: 8 }, values: { organise: 0.7, protest: 0.4, samesex: 0.6, divorce: 0.2 } },
     Cynic:           { likes: { address: -16, uniform: -10, gamble: 6 }, values: { address: -0.6, uniform: -0.4 } },
   };
   CC.MOTIVE = {
@@ -166,6 +180,18 @@
     wall:     { short: 'Wall', label: 'Gate and wall', size: 2, mat: 16, upkeep: 0.5, color: '#4a4a4a', desc: 'Leaving unseen is much harder. Outsiders notice.' },
   };
 
+  /* YOUR MONEY: things you can buy for yourself. upkeep is paid from your own pocket each morning. */
+  CC.SHOP = {
+    aide:    { label: 'Hire an aide', cost: 40, upkeep: 3, max: 2, desc: 'Runs errands for you: one more action every day.' },
+    guards:  { label: 'Hire bodyguards', cost: 30, upkeep: 2, desc: 'Much harder to assassinate or snatch. They count in a coup.' },
+    villa:   { label: 'A container of your own', cost: 60, desc: 'Private, comfortable, discreet. You recover faster and secrets fade faster. Some will resent it.' },
+    clothes: { label: 'Good clothes', cost: 20, desc: 'You look the part. Speeches and campaigning work better.' },
+  };
+  CC.OVERTIME_BASE = 10;              // an extra action today costs this, doubling each time
+  CC.DEFAULT_WAGE = 3;                // paid from the treasury for each shift
+  CC.DEFAULT_SALARY = 2;              // paid from the treasury to the leader each day
+  CC.SHIFT_VALUE = 3;                 // what one shift of work earns the commune
+
   CC.INSTITUTIONS = {
     police:  { label: 'Secret police', cost: 40, upkeep: 4, desc: 'Allows enforcement by the secret police. Finds plots. Feared.' },
     cameras: { label: 'Camera network', cost: 50, upkeep: 2, desc: 'Allows enforcement by cameras. Outsiders notice.' },
@@ -186,10 +212,12 @@
     both:     'Both apply (no rule)',
   };
 
-  CC.FIRST = ['Maggie', 'Tomás', 'Priya', 'Dev', 'Sam', 'Ellie', 'Mo', 'Gwen', 'Kofi', 'Aoife', 'Barry', 'Lena', 'Rhian', 'Jun', 'Zainab', 'Callum', 'Nana', 'Lily', 'Theo', 'Ruby',
-    'Ade', 'Bea', 'Cal', 'Dina', 'Ezra', 'Fern', 'Gus', 'Hana', 'Idris', 'Jas', 'Kit', 'Leon', 'Mira', 'Nico', 'Ola', 'Pip', 'Quinn', 'Rosa', 'Saul', 'Tess',
-    'Una', 'Vik', 'Wren', 'Yusuf', 'Zoe', 'Alfie', 'Bryn', 'Cerys', 'Darius', 'Effie', 'Femi', 'Gita', 'Hal', 'Imani', 'Joel', 'Kasia', 'Lorcan', 'Maya', 'Noor', 'Oisín',
-    'Paz', 'Rafi', 'Sian', 'Tariq', 'Ugo', 'Vera', 'Will', 'Xan', 'Yara', 'Zak', 'Asha', 'Bilal', 'Chloe', 'Dafydd', 'Esi', 'Farah', 'Grace', 'Hugo', 'Ines', 'Jude'];
+  CC.FIRST_M = ['Tomás', 'Dev', 'Mo', 'Kofi', 'Barry', 'Jun', 'Callum', 'Theo', 'Ade', 'Cal', 'Ezra', 'Gus', 'Idris', 'Leon', 'Nico', 'Saul', 'Vik', 'Yusuf', 'Alfie', 'Darius',
+    'Femi', 'Hal', 'Joel', 'Lorcan', 'Oisín', 'Rafi', 'Tariq', 'Ugo', 'Will', 'Zak', 'Bilal', 'Dafydd', 'Hugo', 'Jude', 'Kwame', 'Omar', 'Ravi', 'Seb', 'Luca', 'Arlo'];
+  CC.FIRST_F = ['Maggie', 'Priya', 'Ellie', 'Gwen', 'Aoife', 'Lena', 'Rhian', 'Zainab', 'Nana', 'Lily', 'Ruby', 'Bea', 'Dina', 'Fern', 'Hana', 'Mira', 'Ola', 'Rosa', 'Tess', 'Una',
+    'Wren', 'Zoe', 'Cerys', 'Effie', 'Gita', 'Imani', 'Kasia', 'Maya', 'Noor', 'Sian', 'Vera', 'Yara', 'Asha', 'Chloe', 'Esi', 'Farah', 'Grace', 'Ines', 'Ada', 'Nell'];
+  CC.FIRST_X = ['Sam', 'Jas', 'Kit', 'Pip', 'Quinn', 'Bryn', 'Paz', 'Xan', 'Ash', 'Robin', 'Rowan', 'Sky', 'Jules', 'Remy'];
+  CC.FIRST = CC.FIRST_M.concat(CC.FIRST_F, CC.FIRST_X);
   CC.LAST = ['Doyle', 'Reyes', 'Nair', 'Patel', 'Okafor', 'Brooks', 'Hassan', 'Pryce', 'Mensah', 'Kelly', 'Shaw', 'Novak', 'Morgan', 'Wei', 'Ali', 'Fraser', 'Owusu', 'Evans',
     'Hughes', 'Khan', 'Murphy', 'Walsh', 'Adeyemi', 'Kowalski', 'Lewis', 'Begum', 'Byrne', 'Clarke', 'Dlamini', 'Farah', 'Gill', 'Ivanova', 'Jones', 'Lin', 'Mahmood', 'Nwosu', 'Quinn', 'Rossi', 'Singh', 'Taylor'];
 

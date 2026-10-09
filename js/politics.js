@@ -11,7 +11,8 @@
   let S = null;
   CC._politicsUse = (s) => { S = s; };
   const I = CC._internals;
-  const { clamp, rnd, chance, pick, shuffle, P, alive, here, free, npcFree, adultsHere, has, player, leaderIsPlayer, regimeOp, nm, Nm, list, blame, log } = I;
+  const { clamp, rnd, chance, pick, shuffle, P, alive, here, free, npcFree, adultsHere, has, player, leaderIsPlayer, regimeOp, nm, Nm, list, blame, log, partnersOf, livePartners, sameSex, attracted, money } = I;
+  const owned = () => S.owned || (S.owned = { aides: 0, guards: false, villa: false, clothes: false });
   const demo = () => CC.GOV[S.gov.type].demo;
   const fmt = (n) => Math.round(n);
   function note(text) { S.dayNotes.push(text); }
@@ -109,13 +110,28 @@
   }
 
   // ───────────────────────── votes ─────────────────────────
-  function voterLawScore(v, L, proposer, isRepeal, noise) {
-    let s = v.lawSupport[L.id] != null && isRepeal ? v.lawSupport[L.id] : CC.supportFor(v, L);
-    if (isRepeal) s = -s;
+  // why a voter leans the way they do: each part is a number of points for (+) or against (-)
+  function voterParts(v, L, proposer, isRepeal) {
+    const parts = [];
+    let own = v.lawSupport[L.id] != null && isRepeal ? v.lawSupport[L.id] : CC.supportFor(v, L);
+    if (isRepeal) own = -own;
+    parts.push({ k: 'own', v: own, t: own > 0 ? (isRepeal ? 'wants it gone' : 'thinks it is a good law') : (isRepeal ? 'wants to keep it' : 'thinks it is a bad law') });
     const party = partyOf(v);
-    if (party && party.stance[L.beh] != null) s += (isRepeal ? -1 : 1) * party.stance[L.beh] * RULES[L.rule].dir * 25 * party.discipline;
-    if (proposer != null && proposer === S.gov.leader) s += regimeOp(v) * 0.12 + (v.fear > 40 ? (v.fear - 40) * 0.3 : 0);
-    if (proposer === PLAYER) s += v.opinion * 0.15 + v.lobby + (v.bribed ? 20 : 0);
+    if (party && party.stance[L.beh] != null) { const x = (isRepeal ? -1 : 1) * party.stance[L.beh] * RULES[L.rule].dir * 25 * party.discipline; parts.push({ k: 'party', v: x, t: `${party.name} line: ${x > 0 ? 'for' : 'against'}` }); }
+    if (proposer != null && proposer === S.gov.leader) {
+      const g = regimeOp(v) * 0.12; parts.push({ k: 'govt', v: g, t: g > 0 ? 'backs the government' : 'distrusts the government' });
+      if (v.fear > 40) parts.push({ k: 'fear', v: (v.fear - 40) * 0.3, t: 'afraid to say no' });
+    }
+    if (proposer === PLAYER || L.by === PLAYER) {
+      parts.push({ k: 'you', v: v.opinion * 0.15, t: v.opinion > 0 ? 'likes you' : 'dislikes you' });
+      if (v.lobby) parts.push({ k: 'lobby', v: v.lobby, t: 'you have worked on them' });
+      if (v.bribed) parts.push({ k: 'bribe', v: 20, t: 'took your money' });
+    }
+    if (S._petitionBoost) parts.push({ k: 'petition', v: S._petitionBoost, t: 'the petition' });
+    return parts;
+  }
+  function voterLawScore(v, L, proposer, isRepeal, noise) {
+    let s = voterParts(v, L, proposer, isRepeal).reduce((n, p) => n + p.v, 0);
     if (noise) s += (rnd() - 0.5) * 16;
     return s;
   }
@@ -123,7 +139,10 @@
     let yes = 0, no = 0; const ayes = [], noes = [];
     for (const v of voters) {
       let s;
-      if (v.isPlayer) {
+      if (v.isPlayer && S._pvote !== undefined) {
+        if (S._pvote == null) continue;
+        s = S._pvote === 'yes' ? 1 : -1;
+      } else if (v.isPlayer) {
         if (proposer === PLAYER) s = 100;
         else { const st = playerStance()[L.beh] || 0; s = st * RULES[L.rule].dir * 50 * (isRepeal ? -1 : 1); if (!st) s = isRepeal ? -1 : -1; }
       } else s = voterLawScore(v, L, proposer, isRepeal, noise);
@@ -143,6 +162,31 @@
     if (!voters.length) return null;
     const r = vote(L, voters, leaderIsPlayer() ? PLAYER : null, false, false);
     return { yes: r.yes, no: r.no, total: voters.length, who: S.gov.type };
+  };
+  // who would vote which way on a law (or its repeal), and why
+  CC.voteDetail = function (spec, opts) {
+    opts = opts || {};
+    if (!demo()) return null;
+    const L = opts.law || CC._laws.buildLaw({ ...spec, by: opts.by != null ? opts.by : PLAYER });
+    if (!opts.law) L.id = -1;
+    const proposer = opts.proposer !== undefined ? opts.proposer : leaderIsPlayer() ? PLAYER : null;
+    const voters = lawVoters();
+    if (!voters.length) return null;
+    const lean = (s) => (s > 15 ? 'for' : s > 0 ? 'leaning for' : s > -15 ? 'leaning against' : 'against');
+    const rows = voters.map((v) => {
+      if (v.isPlayer) return { id: v.id, you: true, name: 'You', score: 0, lean: 'your vote', why: '' };
+      const parts = voterParts(v, L, proposer, !!opts.repeal);
+      const score = parts.reduce((n, p) => n + p.v, 0);
+      const why = parts.filter((p) => Math.abs(p.v) >= 6 && Math.sign(p.v) === Math.sign(score)).sort((a, b) => Math.abs(b.v) - Math.abs(a.v)).slice(0, 2).map((p) => p.t);
+      const pa = partyOf(v);
+      return { id: v.id, name: `${v.first} ${v.last}`, party: pa ? pa.name : null, color: pa ? pa.color : null, score, lean: lean(score), why: why.join('; ') };
+    });
+    const npc = rows.filter((r) => !r.you);
+    const yes = npc.filter((r) => r.score > 0).length, no = npc.length - yes;
+    if (S.gov.type === 'council') return { type: 'council', rows: rows.sort((a, b) => b.score - a.score), yes, no, total: voters.length, youVote: rows.some((r) => r.you) };
+    const groups = {};
+    for (const r of npc) { const k = r.party || 'No party'; const g = groups[k] || (groups[k] = { name: k, color: r.color, yes: 0, no: 0 }); if (r.score > 0) g.yes++; else g.no++; }
+    return { type: 'assembly', groups: Object.values(groups).sort((a, b) => b.yes + b.no - (a.yes + a.no)), yes, no, total: voters.length, youVote: rows.some((r) => r.you) };
   };
 
   // decide a law: returns {passed, text}
@@ -318,7 +362,7 @@
     let s = 0;
     for (const c of free()) {
       if (c.age < 16 || c.plot != null) continue;
-      if (c.isPlayer) { if (leaderIsPlayer()) s += 1; continue; }
+      if (c.isPlayer) { if (leaderIsPlayer()) s += 1 + (owned().guards ? 2 : 0); continue; }
       const op = regimeOp(c);
       if (op < -20) continue;
       const loyal = op > 20;
@@ -335,7 +379,7 @@
     for (const id of pl.members) {
       const c = P(id);
       if (!c || c.status !== 'free') continue;
-      if (c.isPlayer) { s += 1.5 + Math.max(0, CC.standing() - 50) / 20; continue; }
+      if (c.isPlayer) { s += 1.5 + Math.max(0, CC.standing() - 50) / 20 + (owned().guards ? 2 : 0); continue; }
       s += (c.trade === 'warden' ? 3 : 1) * (c.armed ? 1.4 : 1) * (has(c, 'Hot-headed') ? 1.2 : 1);
     }
     return s;
@@ -418,8 +462,8 @@
     const org = P(pl.org);
     if (pl.kind === 'kill' && leaderIsPlayer()) {
       const p = clamp(0.35 - sec * 0.012, 0.05, 0.5);
-      if (chance(p)) { CC.gameOver('assassinated', `${org.first} ${org.last} and their friends got to you in the night. The commune will have to go on without you.`); return; }
-      R.headlines.push(`Someone tried to kill you last night. Your people stopped them: ${list(pl.members.map(P).filter(Boolean).map((c) => c.first))}.`);
+      if (chance(p * (owned().guards ? 0.3 : 1))) { CC.gameOver('assassinated', `${org.first} ${org.last} and their friends got to you in the night. The commune will have to go on without you.`); return; }
+      R.headlines.push(`Someone tried to kill you last night. ${owned().guards ? 'Your bodyguards' : 'Your people'} stopped them: ${list(pl.members.map(P).filter(Boolean).map((c) => c.first))}.`);
       log('An attempt on your life failed.', 'politics');
       pl.known = true; CC.queueEvent('plot', { plot: pl.id, how: 'after a failed attempt on your life' });
       return;
@@ -481,11 +525,15 @@
       decideRepeal(worst.L, S.gov.leader, R);
     }
   }
-  const TOPIC = { music: 'Quiet Hours', drink: 'Sober Yard', gamble: 'Fair Play', criticise: 'Respect', steal: 'Property', hoard: 'Water Discipline', share: 'Kettle', work: 'Busy Hands', worship: 'Faith', protest: 'Public Order', organise: 'Party', weapon: 'Disarmament', uniform: 'Uniform', address: 'Attendance', volunteer: 'Care', outside: 'Gate Silence', report: 'Vigilance', gather: 'Assembly', trade: 'Market', study: 'Schooling', partner: 'Partnership', child: 'Family' };
+  const TOPIC_NEG = { samesex: 'Natural Family', naked: 'Public Decency', polygamy: 'One Partner', divorce: 'Sacred Bond', partner: 'Single Life', child: 'Family Limits', leave: 'Stay Put', organise: 'Party Ban', worship: 'Secular Yard' };
+  const TOPIC_POS = { samesex: 'Love Is Love', naked: 'Free Body', polygamy: 'Open Hearts', divorce: 'Free to Leave', partner: 'Partnership', child: 'Growing Family', worship: 'Faith', criticise: 'Free Speech', protest: 'Right to Protest', outside: 'Open Door' };
+  const TOPIC = { naked: 'Clothing', samesex: 'Partnership', polygamy: 'Marriage', divorce: 'Divorce', music: 'Quiet Hours', drink: 'Sober Yard', gamble: 'Fair Play', criticise: 'Respect', steal: 'Property', hoard: 'Water Discipline', share: 'Kettle', work: 'Busy Hands', worship: 'Faith', protest: 'Public Order', organise: 'Party', weapon: 'Disarmament', uniform: 'Uniform', address: 'Attendance', volunteer: 'Care', outside: 'Gate Silence', report: 'Vigilance', gather: 'Assembly', trade: 'Market', study: 'Schooling', partner: 'Partnership', child: 'Family' };
   function aiLawName(b, rule) {
     const kind = rule === 'subsidise' || rule === 'reward' ? pick(['Act', 'Charter', 'Scheme']) : pick(['Act', 'Order', 'Edict', 'Rule', 'Decree']);
-    return `The ${TOPIC[b] || BEH[b].short} ${kind}`;
+    const topic = (RULES[rule].dir < 0 ? TOPIC_NEG[b] : TOPIC_POS[b]) || TOPIC[b] || BEH[b].short;
+    return CC.uniqueLawName(`The ${topic} ${kind}`);
   }
+  CC.aiLawName = aiLawName;
   function aiGovern(R) {
     const lead = P(S.gov.leader);
     if (!lead || lead.isPlayer || lead.status !== 'free') return;
@@ -517,7 +565,6 @@
       spec.enf = CC.wardenCount() ? 'wardens' : 'watch'; spec.pun = harsh ? 'service' : 'warning';
     }
     spec.name = aiLawName(b, spec.rule);
-    if (S.laws.some((L) => L.name === spec.name)) spec.name += ' II';
     const L = CC._laws.buildLaw(spec);
     const res = decideLaw(L, lead.id, R);
     if (!demo() && res.passed) R.politics.push(`${lead.first} decreed “${L.name}”.`);
@@ -618,9 +665,138 @@
     const lead = P(S.gov.leader);
     if (lead && !lead.isPlayer && S.gov.type === 'dictatorship' && (has(lead, 'Paranoid') || has(lead, 'Hot-headed'))) {
       const critics = free().filter((c) => c.today.includes('criticise') || c.today.includes('protest'));
-      for (const c of critics) if (chance(c.isPlayer ? 0.3 : 0.15)) CC.applyPunishment(c, 'detention', { why: 'for questioning', how: 'taken by the wardens', R });
+      for (const c of critics) if (chance(c.isPlayer ? (owned().guards ? 0.12 : 0.3) : 0.15)) CC.applyPunishment(c, 'detention', { why: 'for questioning', how: 'taken by the wardens', R });
     }
   };
+
+
+  // ───────────────────────── proposals: citizens bring laws to you ─────────────────────────
+  const SOCIAL = ['samesex', 'naked', 'polygamy', 'divorce'];
+  const cap = (t) => t.charAt(0).toUpperCase() + t.slice(1);
+  const SAY = {
+    samesex: { neg: ["It isn't natural, and it isn't how I was raised.", 'Children need a mother and a father. The law should say so.', "I don't want it in my yard."],
+      pos: ["Who someone loves is nobody's business but theirs.", 'Love is love. The law should say so out loud.', 'We left the old country to stop being told who to love.'],
+      req: ['Why should anyone settle for the old ways? Everyone should try it.', "This yard should be the boldest place on earth."] },
+    naked: { neg: ['There are children in this yard. Put some clothes on.', "I don't want to see that over breakfast.", 'Some of us still have standards.'],
+      pos: ['Clothes are just another uniform.', 'We came here to be free. All the way free.', "Bodies are bodies. Nobody here should be ashamed of theirs."],
+      req: ['Nobody hides anything here. Not even under a shirt.', 'Clothes are a cage. Take them off, all of you.'] },
+    polygamy: { neg: ["One partner each. That's how a family works.", "It's greed, that's all it is.", 'It breaks hearts and it breaks homes.'],
+      pos: ['Why should love be rationed like water?', 'Some of us have more than one person in our hearts.', "It's working for us. Leave us alone."],
+      req: ['One partner each is a waste of love.', 'Bigger households, stronger yard. Everyone should share.'] },
+    divorce: { neg: ['A promise is a promise.', 'Nobody walks out on a family in this yard.', 'Make it hard, and people will try harder.'],
+      pos: ["Nobody should be trapped with someone they've stopped loving.", 'People change. The law should let them.'],
+      req: ['Every partnership should be renewed or ended. No one stays by habit.'] },
+  };
+  function sayFor(b, rule) {
+    const B = BEH[b], noun = CC.NOUN[b] || B.label;
+    const set = SAY[b];
+    const dir = RULES[rule].dir;
+    if (set) return pick(rule === 'require' && set.req ? set.req : dir < 0 ? set.neg : set.pos);
+    if (rule === 'require') return pick([`Everyone should ${B.label}. No exceptions.`, `If people won't ${B.label} on their own, make them.`]);
+    if (dir < 0) return pick([`People ${B.label} and the rest of us pay for it.`, `Enough. It's time someone put a stop to ${noun}.`, `I'm sick of ${noun}. Everyone is.`]);
+    return pick([`If we want more people to ${B.label}, we should make it worth their while.`, `${cap(noun)} is good for all of us.`, `Reward the people who ${B.label}. Simple.`]);
+  }
+  const PUN_BY_SEV = Object.keys(PUN).sort((a, b) => PUN[a].sev - PUN[b].sev);
+  function proposalFrom(c) {
+    const d = CC.desires(c);
+    const cands = [];
+    for (const b of CC.POLICY_BEH) {
+      if (b === 'address') continue;
+      const v = d[b] || 0;
+      if (Math.abs(v) < 0.35) continue;
+      if (S.laws.some((L) => L.beh === b && Math.sign(RULES[L.rule].dir) === Math.sign(v))) continue;
+      cands.push({ b, v, w: Math.abs(v) * (SOCIAL.includes(b) ? 2.5 : 1) });
+    }
+    if (!cands.length) return null;
+    let r = rnd() * cands.reduce((n, x) => n + x.w, 0), pickd = cands[0];
+    for (const x of cands) { r -= x.w; if (r <= 0) { pickd = x; break; } }
+    const { b, v } = pickd;
+    const harsh = has(c, 'Paranoid') || has(c, 'Hot-headed') || (has(c, 'Devout') && v < 0) || (has(c, 'Loyal') && S.gov.type === 'dictatorship');
+    const rules = CC.rulesFor(b);
+    let rule;
+    if (v < 0) rule = Math.abs(v) > 0.6 || harsh ? 'ban' : pick(['tax', 'ration', 'license', 'ban'].filter((x) => rules.includes(x)));
+    else rule = (Math.abs(v) > 0.75 && chance(SOCIAL.includes(b) ? 0.3 : harsh ? 0.35 : 0.1) && b !== 'leave') ? 'require' : S.treasury > 40 && chance(0.5) ? 'subsidise' : 'reward';
+    if (!rules.includes(rule)) rule = rules.includes('ban') && v < 0 ? 'ban' : 'reward';
+    // who it is for
+    let who = BEH[b].minAge >= 16 ? 'adults' : 'everyone';
+    if (chance(0.3)) {
+      if (['naked', 'uniform', 'drink', 'outside', 'weapon', 'gamble', 'work', 'worship'].includes(b)) who = pick(['men', 'women']);
+      else if (['trade', 'outside', 'organise'].includes(b)) who = 'newcomers';
+      else if (b === 'study' && v > 0) who = 'children';
+      else if (b === 'weapon' && v < 0) who = 'notofficials';
+      else if (b === 'organise' && v < 0 && c.party != null) { const opp = S.parties.find((p) => !p.dissolved && p.id !== c.party); if (opp) who = 'party:' + opp.id; }
+    }
+    const spec = { name: aiLawName(b, rule), who, rule, beh: b, amount: Math.abs(v) > 0.7 ? 5 : pick([2, 3]), proposedBy: c.id, enf: 'watch', pun: 'fine', method: pick(['firing', 'hanging', 'injection']), setting: has(c, 'Hot-headed') ? 'public' : 'private' };
+    if (RULES[rule].violation) {
+      spec.enf = harsh ? (S.inst.police ? 'police' : CC.wardenCount() ? 'wardens' : 'watch') : c.motive === 'others' && chance(0.3) ? 'honour' : CC.wardenCount() && chance(0.5) ? 'wardens' : 'watch';
+      const extreme = harsh && Math.abs(v) > 0.85 && ((has(c, 'Devout') && has(c, 'Paranoid')) || (has(c, 'Hot-headed') && has(c, 'Paranoid')) || (has(c, 'Devout') && has(c, 'Hot-headed'))) && chance(0.4);
+      spec.pun = extreme ? pick(['execution', 'torture', 'flogging']) : harsh ? (chance(0.5) ? pick(['longdet', 'flogging', 'exile']) : pick(['bigfine', 'shaming', 'detention'])) : chance(0.6) ? pick(['warning', 'fine', 'service']) : pick(['bigfine', 'shaming', 'novote', 'detention']);
+    }
+    return spec;
+  }
+  function softer(spec) {
+    const s2 = { ...spec, name: CC.uniqueLawName(spec.name.replace(/^The /, 'The Lesser ')) };
+    if (RULES[spec.rule].violation) {
+      const i = PUN_BY_SEV.indexOf(spec.pun);
+      if (i <= 1) { if (spec.rule === 'require') { s2.rule = 'reward'; } else if (CC.rulesFor(spec.beh).includes('tax')) { s2.rule = 'tax'; s2.amount = 2; } else return null; }
+      else { s2.pun = PUN_BY_SEV[Math.max(0, i - 4)]; s2.enf = spec.enf === 'police' ? 'wardens' : 'watch'; }
+      return s2;
+    }
+    if (spec.rule === 'subsidise') { s2.rule = 'reward'; return s2; }
+    if (spec.rule === 'tax' && spec.amount > 1) { s2.amount = 1; return s2; }
+    return null;
+  }
+  function counterFrom(spec, proposerId) {
+    const dir = RULES[spec.rule].dir;
+    const cands = npcFree().filter((c) => c.age >= 18 && c.id !== proposerId).map((c) => ({ c, v: CC.desires(c)[spec.beh] || 0 })).filter((x) => Math.sign(x.v) === -Math.sign(dir) && Math.abs(x.v) >= 0.3).sort((a, b) => Math.abs(b.v) - Math.abs(a.v));
+    if (!cands.length) return null;
+    const c = cands[0].c;
+    const rule = dir < 0 ? (S.treasury > 40 && chance(0.4) ? 'subsidise' : 'reward') : (Math.abs(cands[0].v) > 0.6 && CC.rulesFor(spec.beh).includes('ban') ? 'ban' : CC.rulesFor(spec.beh).includes('tax') ? 'tax' : 'ban');
+    const cs = { name: aiLawName(spec.beh, rule), who: spec.who, rule, beh: spec.beh, amount: 2, enf: 'watch', pun: 'fine', method: 'firing', setting: 'private', proposedBy: c.id };
+    return { spec: cs, by: c.id, say: sayFor(spec.beh, rule) };
+  }
+  function proposalMode() {
+    if (leaderIsPlayer()) return 'decide';
+    if ((S.gov.type === 'council' && S.gov.council.includes(PLAYER)) || (S.gov.type === 'assembly' && player().novote <= 0)) return 'vote';
+    return 'petition';
+  }
+  function maybeProposal() {
+    if (S.pending.some((e) => e.kind === 'proposal') || player().status !== 'free') return;
+    if (!chance(leaderIsPlayer() ? 0.24 : 0.12)) return;
+    const pool = shuffle(npcFree().filter((c) => c.age >= 18 && c.id !== S.gov.leader));
+    pool.sort((a, b) => (has(b, 'Ambitious') + has(b, 'Idealist') + has(b, 'Devout') + has(b, 'Busybody') + (b.party != null)) - (has(a, 'Ambitious') + has(a, 'Idealist') + has(a, 'Devout') + has(a, 'Busybody') + (a.party != null)) + (rnd() - 0.5) * 3);
+    // sometimes it's a call to repeal a law people hate
+    const hated = S.laws.filter((L) => S.day >= L.from + 2).map((L) => ({ L, p: CC.lawPopularity(L) })).filter((x) => x.p.pct < 45).sort((a, b) => a.p.pct - b.p.pct)[0];
+    if (hated && chance(0.3)) {
+      const by = pool.filter((c) => (c.lawSupport[hated.L.id] || 0) < -30)[0];
+      if (by) { CC.queueEvent('proposal', { repeal: hated.L.id, by: by.id, say: pick([`“‘${hated.L.name}’ has done enough damage. Scrap it.”`, `“Nobody asked for ‘${hated.L.name}’. Get rid of it.”`, `“Repeal ‘${hated.L.name}’ and people will thank you.”`]) }); return; }
+    }
+    for (const c of pool.slice(0, 6)) {
+      const spec = proposalFrom(c);
+      if (!spec) continue;
+      const counter = counterFrom(spec, c.id);
+      CC.queueEvent('proposal', { spec, by: c.id, say: sayFor(spec.beh, spec.rule), soft: softer(spec), counter });
+      return;
+    }
+  }
+  function forecastLine(spec, repealId) {
+    if (repealId != null) {
+      const L = S.laws.find((x) => x.id === repealId);
+      if (!L) return '';
+      const p = CC.lawPopularity(L);
+      const vd = CC.voteDetail(null, { law: L, repeal: true, proposer: leaderIsPlayer() ? PLAYER : null });
+      return `${100 - p.pct}% of adults want it gone.${vd ? ` ${S.gov.type === 'council' ? 'Council' : 'Assembly'} forecast: ${vd.yes} for repeal, ${vd.no} against.` : ''}`;
+    }
+    const L = CC._laws.buildLaw({ ...spec, by: PLAYER }); L.id = -1;
+    const xs = adultsHere().filter((c) => !c.isPlayer);
+    const yes = xs.filter((c) => CC.supportFor(c, L) > 0).length;
+    let t = `Backed by about ${yes} of ${xs.length} adults.`;
+    const vd = CC.voteDetail(spec, { proposer: leaderIsPlayer() ? PLAYER : null, by: leaderIsPlayer() ? PLAYER : spec.proposedBy });
+    if (vd) t += ` ${S.gov.type === 'council' ? 'Council' : 'Assembly'} forecast: ${vd.yes} for, ${vd.no} against${vd.youVote ? ', before your vote' : ''}.`;
+    if (vd && vd.type === 'council') t += ' ' + vd.rows.filter((r) => !r.you).map((r) => `${r.name.split(' ')[0]}: ${r.lean}`).join(', ') + '.';
+    return t;
+  }
+  CC.proposalForecast = forecastLine;
 
   // ───────────────────────── events ─────────────────────────
   CC.queueEvent = function (kind, data) {
@@ -628,6 +804,7 @@
     S.pending.push({ id: S.nextEventId++, kind, data, day: S.day });
   };
   CC.morningEvents = function (R) {
+    maybeProposal();
     if (!leaderIsPlayer()) {
       if (demo() && player().party == null && !S.pending.some((e) => e.kind === 'partyInvite') && chance(0.04)) {
         const pl = playerStance();
@@ -797,6 +974,102 @@
         return 'You kept it.';
       },
     },
+    proposal: {
+      make: (d) => {
+        const c = P(d.by);
+        const who = c ? `${c.first} ${c.last}` : 'A citizen';
+        const role = c ? `, ${c.age < 16 ? 'a child' : CC.TRADES[c.trade] ? 'a ' + CC.TRADES[c.trade].label : 'a citizen'}${partyOf(c) ? ' in ' + partyOf(c).name : ''}` : '';
+        const mode = proposalMode();
+        if (d.repeal != null) {
+          const L = S.laws.find((x) => x.id === d.repeal);
+          if (!L) return { title: 'A proposal', text: 'The law in question is already gone.', options: [{ key: 'reject', label: 'Fine' }], def: 'reject' };
+          const opts = mode === 'decide' ? [{ key: 'pass', label: demo() ? `Put the repeal to the ${S.gov.type === 'council' ? 'council' : 'assembly'}` : 'Repeal it', note: forecastLine(null, L.id) }, { key: 'reject', label: 'Keep the law' }]
+            : mode === 'vote' ? [{ key: 'yes', label: 'Vote to repeal', note: forecastLine(null, L.id) }, { key: 'no', label: 'Vote to keep it' }, { key: 'abstain', label: 'Abstain' }]
+            : [{ key: 'sign', label: 'Sign the petition', note: forecastLine(null, L.id) }, { key: 'reject', label: "Don't sign" }];
+          return { title: `${who} wants “${L.name}” repealed`, text: `${d.say} says ${who}${role}. The law: ${CC.describeLaw(L)}`, options: opts, def: mode === 'vote' ? 'abstain' : 'reject', proposal: true };
+        }
+        const law = (spec) => CC.describeLaw(CC._laws.buildLaw({ ...spec, by: PLAYER }));
+        const opts = [];
+        if (mode === 'decide') {
+          const verb = demo() ? `Put it to the ${S.gov.type === 'council' ? 'council' : 'assembly'}` : 'Decree it';
+          opts.push({ key: 'pass', label: `${verb} as proposed`, note: `“${d.spec.name}”: ${law(d.spec)} ${forecastLine(d.spec)}` });
+          if (d.soft) opts.push({ key: 'soft', label: demo() ? 'Put a softer version to the vote' : 'Decree a softer version', note: `“${d.soft.name}”: ${law(d.soft)} ${forecastLine(d.soft)}` });
+          const cc = d.counter && P(d.counter.by);
+          if (cc && alive(cc)) opts.push({ key: 'counter', label: `Side with ${cc.first} instead`, note: `“${d.counter.say}” says ${cc.first} ${cc.last}. “${d.counter.spec.name}”: ${law(d.counter.spec)} ${forecastLine(d.counter.spec)}` });
+          opts.push({ key: 'reject', label: 'Throw it out', note: 'No new law. ' + (c ? c.first + ' will be disappointed.' : '') });
+        } else if (mode === 'vote') {
+          opts.push({ key: 'yes', label: 'Vote for it', note: `${law(d.spec)} ${forecastLine(d.spec)}` }, { key: 'no', label: 'Vote against it' }, { key: 'abstain', label: 'Abstain' });
+        } else {
+          opts.push({ key: 'sign', label: 'Sign the petition', note: `${law(d.spec)} ${forecastLine(d.spec)}` }, { key: 'reject', label: "Don't sign" });
+        }
+        const title = mode === 'decide' ? `${who} proposes “${d.spec.name}”` : mode === 'vote' ? `${S.gov.type === 'council' ? 'Council' : 'Assembly'} vote: “${d.spec.name}”` : `A petition: “${d.spec.name}”`;
+        const lead = mode === 'vote' ? `${who}${role} has put a law to the ${S.gov.type === 'council' ? 'council' : 'assembly'}.` : mode === 'petition' ? `${who}${role} is collecting signatures.` : '';
+        return { title, text: `${lead ? lead + ' ' : ''}“${d.say}” says ${c ? c.first : 'they'}.`, options: opts, def: mode === 'vote' ? 'abstain' : 'reject', proposal: true };
+      },
+      resolve: (d, key) => {
+        const c = P(d.by);
+        const R = S.report;
+        const mode = proposalMode();
+        const warm = (x, n) => { if (x && !x.isPlayer) x.opinion = clamp(x.opinion + n, -100, 100); };
+        if (d.repeal != null) {
+          const L = S.laws.find((x) => x.id === d.repeal);
+          if (!L) return '';
+          if (mode === 'decide') {
+            if (key !== 'pass') { warm(c, -5); for (const x of here()) if (!x.isPlayer && (x.lawSupport[L.id] || 0) < -30) x.opinion -= 1; return `You kept “${L.name}”.`; }
+            warm(c, 8); return decideRepeal(L, PLAYER, R).text;
+          }
+          if (mode === 'vote') {
+            S._pvote = key === 'yes' ? 'yes' : key === 'no' ? 'no' : null;
+            const t = decideRepeal(L, d.by, R).text; delete S._pvote;
+            warm(c, key === 'yes' ? 6 : key === 'no' ? -6 : 0); return t;
+          }
+          if (key === 'sign') { warm(c, 6); S._petitionBoost = 8; }
+          else if (chance(0.6)) return 'You kept your name off it. The petition ran out of steam.';
+          const lead = P(S.gov.leader);
+          let t;
+          if (demo()) t = decideRepeal(L, d.by, R).text;
+          else if (lead && -(lead.lawSupport[L.id] || 0) + (key === 'sign' ? 10 : 0) > 20) { CC._laws.repeal(L, R, lead.id); t = `${lead.first} repealed “${L.name}”.`; }
+          else t = `${lead ? lead.first : 'The ruler'} ignored the petition. “${L.name}” stays.`;
+          delete S._petitionBoost;
+          return (key === 'sign' ? 'You signed. ' : '') + t;
+        }
+        const enactFrom = (spec, credit) => {
+          const sp = { ...spec, name: CC.lawNameIssue(spec.name) ? CC.uniqueLawName(spec.name) : spec.name };
+          const L = CC._laws.buildLaw({ ...sp, by: credit });
+          return L;
+        };
+        if (mode === 'decide') {
+          if (key === 'reject') { warm(c, -6); const cc = d.counter && P(d.counter.by); warm(cc, 2); return `You threw out “${d.spec.name}”.`; }
+          const spec = key === 'soft' && d.soft ? d.soft : key === 'counter' && d.counter ? d.counter.spec : d.spec;
+          const res = decideLaw(enactFrom(spec, PLAYER), PLAYER, R);
+          if (key === 'counter') { warm(P(d.counter.by), res.passed ? 10 : 4); warm(c, -8); }
+          else warm(c, res.passed ? (key === 'soft' ? 4 : 10) : 3);
+          return res.text;
+        }
+        if (mode === 'vote') {
+          S._pvote = key === 'yes' ? 'yes' : key === 'no' ? 'no' : null;
+          const res = decideLaw(enactFrom(d.spec, d.by), d.by, R);
+          delete S._pvote;
+          warm(c, key === 'yes' ? 6 : key === 'no' ? -6 : 0);
+          return `You ${key === 'yes' ? 'voted for it' : key === 'no' ? 'voted against it' : 'abstained'}. ${res.text}`;
+        }
+        if (key === 'sign') { warm(c, 6); S._petitionBoost = 8; } else warm(c, -2);
+        if (key !== 'sign' && chance(0.6)) return `You kept your name off it. The petition ran out of steam.`;
+        const L = enactFrom(d.spec, d.by);
+        let t;
+        if (S.gov.type === 'council') {
+          const sponsor = S.gov.council.map(P).filter((x) => x && x.status === 'free' && !x.isPlayer).map((x) => ({ x, s: x.id === d.by ? 100 : CC.supportFor(x, L) })).sort((a, b) => b.s - a.s)[0];
+          t = sponsor && sponsor.s > 10 ? `${sponsor.x.first} ${sponsor.x.id === d.by ? 'put it' : 'took it'} to the council. ${decideLaw(L, sponsor.x.id, R).text}` : 'No councillor would take it up.';
+        } else if (S.gov.type === 'assembly') t = decideLaw(L, d.by, R).text;
+        else {
+          const lead = P(S.gov.leader);
+          if (lead && CC.supportFor(lead, L) + (key === 'sign' ? 10 : 0) > 20) { L.by = lead.id; CC._laws.enact(L, R); t = `${lead.first} liked it and decreed “${L.name}”.`; }
+          else t = `${lead ? lead.first : 'The ruler'} ignored it.`;
+        }
+        delete S._petitionBoost;
+        return (key === 'sign' ? 'You signed. ' : 'You kept your name off it. ') + t;
+      },
+    },
     partyInvite: {
       make: (d) => { const p = partyById(d.party); return { title: `${p ? p.name : 'A party'} wants you`, text: p ? `${P(p.leader) ? P(p.leader).first : 'Its leader'} asks you to join ${p.name}.` : '', options: [{ key: 'join', label: 'Join' }, { key: 'no', label: 'Decline' }], def: 'no' }; },
       resolve: (d, key) => { const p = partyById(d.party); if (key === 'join' && p) { player().party = p.id; return `You joined ${p.name}.`; } return 'You declined.'; },
@@ -849,7 +1122,13 @@
   function target(id) { const c = P(id); return c && c.status === 'free' && !c.isPlayer ? c : null; }
   const A = {};
   // personal
-  A.work = { label: 'Work a shift', ap: 1, check: () => freeMe(), run: () => { const tax = Math.round(4 * S.gov.tax); player().scrip += 4 - tax; S.treasury += tax; S.pdid.push('work'); return `You worked a shift and earned ${4 - tax} scrip.`; } };
+  // you do something the law may tax, pay or honour
+  function pdo(b) { S.pdid.push(b); const n = CC.lawMoney(player(), b); return n.length ? ` You ${list(n)}.` : ''; }
+  const style = () => (owned().clothes ? 1.3 : 1);
+  A.work = {
+    label: 'Work a shift', ap: 1, check: () => freeMe(),
+    run: () => { const r = CC.payShift(player()); const extra = pdo('work'); return (r.ok ? (r.paid ? `You worked a shift and earned ${r.paid} scrip.` : 'You worked a shift. The commune pays no wages.') : 'You worked a shift, but the treasury could not pay you.') + extra; },
+  };
   A.speak = {
     label: 'Speak in the yard', ap: 1, check: () => freeMe(),
     run: ({ tone }) => {
@@ -859,14 +1138,15 @@
       let moved = 0;
       for (const c of aud) {
         let d = 0;
-        if (tone === 'ideas') d = Object.keys(st).length ? CC.agreement(c, st) * 12 + 1 : 1;
+        if (tone === 'ideas') d = (Object.keys(st).length ? CC.agreement(c, st) * 12 + 1 : 1) * style();
         if (tone === 'praise') { d = has(c, 'Loyal') ? 4 : regimeOp(c) < -20 ? -4 : 0; c.govt = clamp(c.govt + 2, -100, 100); }
         if (tone === 'criticise') { d = Math.max(-6, -regimeOp(c) * 0.08) + (has(c, 'Loyal') ? -6 : 0) + (has(c, 'Rebellious') ? 3 : 0); c.govt = clamp(c.govt - 3, -100, 100); }
         c.opinion = clamp(c.opinion + d, -100, 100); if (d > 0) moved++;
       }
-      if (tone === 'criticise') S.pdid.push('criticise');
-      S.pdid.push('gather');
-      return `${aud.length} people listened${mast ? ' over the broadcast' : ''}. ${moved} warmed to you.`;
+      let extra = '';
+      if (tone === 'criticise') extra += pdo('criticise');
+      extra += pdo('gather');
+      return `${aud.length} people listened${mast ? ' over the broadcast' : ''}. ${moved} warmed to you.${extra}`;
     },
   };
   A.befriend = {
@@ -885,16 +1165,43 @@
   };
   A.court = {
     label: 'Ask them to be your partner', ap: 1,
-    check: ({ id }) => freeMe() || need(target(id), 'They are not around.') || need(player().partner == null, 'You already have a partner.') || need(target(id) && target(id).partner == null && target(id).age >= 18, 'They are not single.'),
+    check: ({ id }) => freeMe() || need(target(id) && target(id).age >= 18, 'They are not around.') || need(!partnersOf(player()).includes(id), 'You are already partners.')
+      || need(target(id) && (partnersOf(target(id)).length === 0 || CC.likeOf(target(id), 'polygamy') > 0), 'They are already spoken for.'),
     run: ({ id }) => {
-      const c = target(id);
+      const c = target(id), me = player();
+      const extra = partnersOf(me).length > 0 || partnersOf(c).length > 0;
+      if (!attracted(c, me)) { c.opinion = clamp(c.opinion + 2, -100, 100); return `${c.first} is fond of you, but not in that way.`; }
       if (c.opinion < 45 || !c.friends.includes(PLAYER)) { c.opinion += 3; return `${c.first} likes you, but not like that. Not yet, anyway.`; }
-      CC._people.pair(player(), c);
-      log(`You and ${c.first} ${c.last} became partners.`, 'life');
-      for (const L of S.laws) if (L.beh === 'partner' && RULES[L.rule].violation && CC.governs(L, player()) && (L.rule === 'ban' || L.rule === 'license' || (L.rule === 'ration' && player().life.partner > 1)) && chance(CC.catchRate(L) + 0.25)) {
-        if (leaderIsPlayer()) CC.queueEvent('selfcaught', { law: L.id }); else CC.applyPunishment(player(), L.pun, { why: `for forming a partnership against “${L.name}”`, how: 'caught', R: S.report, method: L.method, setting: L.setting });
+      if (extra && CC.likeOf(c, 'polygamy') < -10 && !partnersOf(c).length) { c.opinion -= 4; return `${c.first} won't share you with anyone.`; }
+      CC._people.pair(me, c, extra);
+      for (const q of livePartners(me)) if (q !== c && !q.isPlayer && CC.likeOf(q, 'polygamy') < 0) { q.grudges[PLAYER] = (q.grudges[PLAYER] || 0) + 25; q.opinion -= 20; }
+      log(extra ? `You took ${c.first} ${c.last} as another partner.` : `You and ${c.first} ${c.last} became partners.`, 'life');
+      const kinds = ['partner']; if (sameSex(me, c)) kinds.push('samesex'); if (extra) kinds.push('polygamy');
+      const notes = [];
+      for (const b of kinds) {
+        notes.push(...CC.lawMoney(me, b));
+        for (const L of S.laws) if (L.beh === b && RULES[L.rule].violation && CC.governs(L, me) && (L.rule === 'ban' || (L.rule === 'license' && !me.licenses.includes(L.id)) || (L.rule === 'ration' && (me.life[b] || 0) > 1)) && chance(CC.catchRate(L) + 0.25)) {
+          if (leaderIsPlayer()) CC.queueEvent('selfcaught', { law: L.id }); else CC.applyPunishment(me, L.pun, { why: `for ${b === 'samesex' ? 'a same-sex partnership' : b === 'polygamy' ? 'taking another partner' : 'forming a partnership'} against “${L.name}”`, how: 'caught', R: S.report, method: L.method, setting: L.setting });
+          break;
+        }
       }
-      return `You and ${c.first} are partners now.`;
+      return `${extra ? `${c.first} is your partner too now.` : `You and ${c.first} are partners now.`}${notes.length ? ' You ' + list(notes) + '.' : ''}`;
+    },
+  };
+  A.divorce = {
+    label: 'End your partnership', ap: 1, check: ({ id }) => freeMe() || need(partnersOf(player()).includes(id), 'You are not partners.'),
+    run: ({ id }) => {
+      const me = player(), c = P(id);
+      CC._people.unpair(me, c);
+      me.life.divorce = (me.life.divorce || 0) + 1; me.lastDivorce = S.day; c.life.divorce = (c.life.divorce || 0) + 1; c.lastDivorce = S.day;
+      if (!c.isPlayer) { c.opinion = clamp(c.opinion - 30, -100, 100); c.grudges[PLAYER] = (c.grudges[PLAYER] || 0) + 20; c.needs.belonging -= 20; }
+      log(`You and ${c.first} ${c.last} split up.`, 'life');
+      const notes = CC.lawMoney(me, 'divorce');
+      for (const L of S.laws) if (L.beh === 'divorce' && RULES[L.rule].violation && CC.governs(L, me) && (L.rule === 'ban' || (L.rule === 'license' && !me.licenses.includes(L.id)) || (L.rule === 'ration' && me.life.divorce > 1)) && chance(CC.catchRate(L) + 0.25)) {
+        if (leaderIsPlayer()) CC.queueEvent('selfcaught', { law: L.id }); else CC.applyPunishment(me, L.pun, { why: `for divorcing against “${L.name}”`, how: 'caught', R: S.report, method: L.method, setting: L.setting });
+        break;
+      }
+      return `You and ${c.first} are no longer partners.${notes.length ? ' You ' + list(notes) + '.' : ''}`;
     },
   };
   A.child = {
@@ -904,7 +1211,7 @@
   A.outsiders = {
     label: 'Talk to outsiders', ap: 1, check: () => freeMe(),
     run: () => {
-      S.pdid.push('outside');
+      pdo('outside');
       if (leaderIsPlayer()) { const good = CC.wellbeing() > 55 && S.legitimacy > 50; S.attention = clamp(S.attention + (good ? -4 : 5), 0, 100); return good ? 'You gave an interview. It went well.' : 'You gave an interview. It did not go well.'; }
       S.attention = clamp(S.attention + 3, 0, 100);
       const lead = P(S.gov.leader); if (lead && (S.gov.type === 'dictatorship' || S.stats.executions)) S.legitimacy = clamp(S.legitimacy - 3, 0, 100);
@@ -913,7 +1220,7 @@
   };
   A.rally = {
     label: 'Organise a protest', ap: 1, check: () => freeMe() || need(!leaderIsPlayer(), 'You are the government.'),
-    run: () => { S.rally = true; S.pdid.push('protest'); return 'You spread the word. Anyone unhappy with the government will join you in the yard today.'; },
+    run: () => { S.rally = true; pdo('protest'); return 'You spread the word. Anyone unhappy with the government will join you in the yard today.'; },
   };
   A.walkAway = { label: 'Leave the commune for good', ap: 0, check: () => null, run: () => { CC.gameOver('retired', leaderIsPlayer() ? 'You handed over the keys and walked out of the gate.' : 'You packed a bag and walked out of the gate.'); return ''; } };
   // parties and elections
@@ -960,27 +1267,83 @@
     label: 'Campaign', ap: 1,
     check: () => freeMe() || need(demo() && S.gov.nextElection != null, 'There are no elections.') || need(S.gov.nextElection - S.day <= 8, 'The election is more than 8 days away.') || need(S.standing || partyOf(player()), 'Stand for election or join a party first.'),
     run: () => {
-      S.campaign += 1; S.pdid.push('organise');
+      S.campaign += style();
+      const extra = pdo('organise');
       const st = playerStance();
       let n = 0;
-      for (const c of shuffle(adultsHere().filter((x) => !x.isPlayer)).slice(0, Math.ceil(adultsHere().length * 0.35))) { c.opinion = clamp(c.opinion + CC.agreement(c, st) * 6 + 2, -100, 100); n++; }
-      return `You knocked on ${n} doors.`;
+      for (const c of shuffle(adultsHere().filter((x) => !x.isPlayer)).slice(0, Math.ceil(adultsHere().length * 0.35))) { c.opinion = clamp(c.opinion + (CC.agreement(c, st) * 6 + 2) * style(), -100, 100); n++; }
+      return `You knocked on ${n} doors.${extra}`;
     },
   };
   // shadows
   A.bribe = {
     label: 'Bribe them (10 scrip)', ap: 1,
-    check: ({ id }) => freeMe() || need(target(id), 'They are not around.') || need(player().scrip >= 10 || (leaderIsPlayer() && S.treasury >= 10), 'You need 10 scrip.'),
-    run: ({ id }) => {
-      const c = target(id);
-      const fromTreasury = player().scrip < 10;
-      if (fromTreasury) S.treasury -= 10; else player().scrip -= 10;
+    check: ({ id, amt }) => { const a = amt || 10; return freeMe() || need(target(id), 'They are not around.') || need(player().scrip >= a || (leaderIsPlayer() && S.treasury >= a), `You need ${a} scrip.`); },
+    run: ({ id, amt }) => {
+      const c = target(id), a = amt || 10, big = a >= 30;
+      const fromTreasury = player().scrip < a;
+      if (fromTreasury) S.treasury -= a; else player().scrip -= a;
       const refuse = (c.motive === 'others' && c.accuracy > 60) || has(c, 'Devout') || (has(c, 'Loyal') && !leaderIsPlayer());
-      if (refuse && chance(0.4)) { c.opinion = clamp(c.opinion - 15, -100, 100); secret(`tried to bribe ${c.first}`, 12); return `${c.first} refused your money, and looked at you differently.`; }
-      c.scrip += 10; c.bribed = 12; c.lobby += 30; c.opinion = clamp(c.opinion + 8, -100, 100);
-      secret(`bribed ${c.first}${fromTreasury ? ' with public money' : ''}`, fromTreasury ? 8 : 4);
-      return `${c.first} took the money. They'll remember who their friends are.`;
+      if (refuse && chance(big ? 0.25 : 0.4)) { c.opinion = clamp(c.opinion - 15, -100, 100); secret(`tried to bribe ${c.first}`, big ? 16 : 12); return `${c.first} refused your money, and looked at you differently.`; }
+      c.scrip += a; c.bribed = big ? 24 : 12; c.lobby += big ? 55 : 30; c.opinion = clamp(c.opinion + (big ? 16 : 8), -100, 100);
+      secret(`bribed ${c.first}${fromTreasury ? ' with public money' : ''}`, (fromTreasury ? 8 : 4) * (big ? 1.5 : 1));
+      return big ? `${c.first} pocketed the money fast. They're yours for a while.` : `${c.first} took the money. They'll remember who their friends are.`;
     },
+  };
+  A.gift = {
+    label: 'Give them a gift (15 scrip)', ap: 1,
+    check: ({ id }) => freeMe() || need(target(id), 'They are not around.') || need(player().scrip >= 15, 'You need 15 scrip.'),
+    run: ({ id }) => {
+      const c = target(id); player().scrip -= 15; c.scrip += 15;
+      c.opinion = clamp(c.opinion + 12 + (c.motive === 'self' ? 4 : 0), -100, 100); c.lobby += 8; c.needs.belonging = clamp(c.needs.belonging + 8, 0, 100);
+      for (const p of livePartners(c)) if (!p.isPlayer) p.opinion += 2;
+      return `You gave ${c.first} a gift. They were touched.`;
+    },
+  };
+  // your own money
+  const otPrice = () => CC.OVERTIME_BASE * Math.pow(2, S.otToday || 0);
+  CC.otPrice = otPrice;
+  A.overtime = {
+    label: 'Pay for an extra action today', ap: 0, check: () => freeMe() || need(player().scrip >= otPrice(), `Costs ${otPrice()} scrip.`),
+    run: () => { const pr = otPrice(); player().scrip -= pr; S.otToday = (S.otToday || 0) + 1; S.ap += 1; return `You paid ${pr} scrip to have someone else do your chores. One more action today.`; },
+  };
+  A.hireAide = {
+    label: 'Hire an aide', ap: 0, check: () => freeMe() || need(owned().aides < CC.SHOP.aide.max, 'You have as many aides as you can use.') || need(player().scrip >= CC.SHOP.aide.cost, `Costs ${CC.SHOP.aide.cost} scrip.`),
+    run: () => { player().scrip -= CC.SHOP.aide.cost; owned().aides++; S.apMax = 3 + owned().aides; S.ap += 1; log('You hired an aide.', 'you'); return `You hired an aide. One more action every day, for ${CC.SHOP.aide.upkeep} scrip a day.`; },
+  };
+  A.fireAide = { label: 'Let an aide go', ap: 0, check: () => need(owned().aides > 0, 'You have no aides.'), run: () => { owned().aides--; S.apMax = 3 + owned().aides; S.ap = Math.min(S.ap, S.apMax + (S.otToday || 0)); return 'You let your aide go.'; } };
+  A.guards = {
+    label: 'Hire bodyguards', ap: 0, check: () => freeMe() || need(!owned().guards, 'You already have bodyguards.') || need(player().scrip >= CC.SHOP.guards.cost, `Costs ${CC.SHOP.guards.cost} scrip.`),
+    run: () => { player().scrip -= CC.SHOP.guards.cost; owned().guards = true; for (const c of here()) if (!c.isPlayer && has(c, 'Paranoid')) c.opinion -= 2; return `Two large people now follow you everywhere, for ${CC.SHOP.guards.upkeep} scrip a day.`; },
+  };
+  A.dropGuards = { label: 'Dismiss your bodyguards', ap: 0, check: () => need(owned().guards, 'You have no bodyguards.'), run: () => { owned().guards = false; return 'You sent your bodyguards home.'; } };
+  A.villa = {
+    label: 'Get a container of your own', ap: 0, check: () => freeMe() || need(!owned().villa, 'You already have one.') || need(player().scrip >= CC.SHOP.villa.cost, `Costs ${CC.SHOP.villa.cost} scrip.`),
+    run: () => {
+      player().scrip -= CC.SHOP.villa.cost; owned().villa = true;
+      const hard = CC.wellbeing() < 45;
+      let n = 0;
+      for (const c of here()) if (!c.isPlayer && (c.motive === 'others' || has(c, 'Idealist'))) { c.opinion = clamp(c.opinion - (hard ? 8 : 4), -100, 100); n++; }
+      log('You had a container of your own fitted out.', 'you');
+      return `Your own container: insulated, private, with a door that locks.${n ? ` ${hard ? 'With people going short, ' : ''}${n} people think less of you for it.` : ''}`;
+    },
+  };
+  A.clothes = {
+    label: 'Buy good clothes', ap: 0, check: () => freeMe() || need(!owned().clothes, 'You already look the part.') || need(player().scrip >= CC.SHOP.clothes.cost, `Costs ${CC.SHOP.clothes.cost} scrip.`),
+    run: () => { player().scrip -= CC.SHOP.clothes.cost; owned().clothes = true; return 'You look the part now. People listen a little harder.'; },
+  };
+  A.round = {
+    label: 'Buy a round at the bar (12 scrip)', ap: 1, check: () => freeMe() || need(S.buildings.bar, 'There is no bar.') || need(player().scrip >= 12, 'You need 12 scrip.'),
+    run: () => {
+      player().scrip -= 12; const extra = pdo('drink');
+      let n = 0;
+      for (const c of here()) if (!c.isPlayer && c.age >= 18 && CC.likeOf(c, 'drink') > 5 && chance(0.7)) { c.opinion = clamp(c.opinion + 5, -100, 100); c.needs.belonging = clamp(c.needs.belonging + 6, 0, 100); n++; }
+      return `You bought a round. ${n} people raised a glass to you.${extra}`;
+    },
+  };
+  A.embezzle = {
+    label: 'Help yourself to the treasury', ap: 1, check: () => freeMe() || lead() || need(S.treasury >= 10, 'There is not enough in the treasury to hide a theft.'),
+    run: () => { const amt = Math.min(25, Math.floor(S.treasury)); S.treasury -= amt; player().scrip += amt; secret(`took ${amt} scrip from the treasury`, 12); return `You moved ${amt} scrip from the treasury into your own pocket. Nobody saw. Probably.`; },
   };
   A.threaten = {
     label: 'Threaten them', ap: 1, check: ({ id }) => freeMe() || need(target(id), 'They are not around.'),
@@ -1130,7 +1493,7 @@
     },
   };
   A.proposeLaw = {
-    label: 'Pass a law', ap: 1, check: () => freeMe(),
+    label: 'Pass a law', ap: 1, check: ({ spec }) => freeMe() || CC.lawNameIssue(spec && spec.name),
     run: ({ spec }) => {
       const R = S.report;
       if (leaderIsPlayer()) { const L = CC._laws.buildLaw({ ...spec, by: PLAYER }); return decideLaw(L, PLAYER, R).text; }
@@ -1180,6 +1543,9 @@
       case 'term': return ch.value > S.gov.term ? regimeOp(c) * 0.2 - 5 : 5 - regimeOp(c) * 0.2;
       case 'exempt': return ch.value ? -30 + (has(c, 'Loyal') ? 25 : 0) : 15;
       case 'type': return ch.value === 'assembly' ? 10 + (has(c, 'Idealist') ? 20 : 0) - (has(c, 'Loyal') ? 5 : 0) : 5 + (has(c, 'Loyal') ? 5 : 0);
+      case 'wage': return (ch.value - S.gov.wage) * 12 * (c.motive === 'self' ? 1.3 : 0.8) * (c.age >= 16 && !c.retired ? 1 : 0.4) - (S.treasury < 20 && ch.value > S.gov.wage ? 12 : 0) + (S.treasury < 0 && ch.value < S.gov.wage ? 6 : 0);
+      case 'salary': return (S.gov.salary - ch.value) * 3 + (has(c, 'Loyal') ? 6 : 0) - 2;
+      case 'currency': return 6 + (has(c, 'Rebellious') ? 4 : 0) - (has(c, 'Cynic') ? 8 : 0);
     }
     return 0;
   };
@@ -1190,7 +1556,12 @@
     if (ch.kind === 'term') S.gov.term = ch.value;
     if (ch.kind === 'exempt') S.gov.exempt = ch.value;
     if (ch.kind === 'type') { S.gov.type = ch.value; S.gov.nextElection = S.day + 6; S.gov.council = []; }
+    if (ch.kind === 'wage') S.gov.wage = ch.value;
+    if (ch.kind === 'salary') S.gov.salary = ch.value;
+    if (ch.kind === 'currency') S.currency = cleanCurrency(ch.value);
   }
+  function cleanCurrency(v) { return String(v || '').trim().replace(/\s+/g, ' ').slice(0, 20) || 'scrip'; }
+  CC.cleanCurrency = cleanCurrency;
   function constLabel(ch) {
     if (ch.kind === 'gate') return CC.GATE[ch.value];
     if (ch.kind === 'tax') return `A work tax of ${Math.round(ch.value * 100)}%`;
@@ -1198,11 +1569,14 @@
     if (ch.kind === 'term') return `Elections every ${ch.value} days`;
     if (ch.kind === 'exempt') return ch.value ? 'The leader is above the law' : 'The leader is bound by the law';
     if (ch.kind === 'type') return CC.GOV[ch.value].label;
+    if (ch.kind === 'wage') return ch.value ? `Wages of ${ch.value} scrip a shift` : 'No wages: work is unpaid';
+    if (ch.kind === 'salary') return ch.value ? `A leader's salary of ${ch.value} scrip a day` : 'The leader takes no salary';
+    if (ch.kind === 'currency') return `The currency is called “${cleanCurrency(ch.value)}”`;
     return '';
   }
   CC.constLabel = constLabel;
   A.amend = {
-    label: 'Amend the constitution', ap: 1, check: () => freeMe() || lead(),
+    label: 'Amend the constitution', ap: 1, check: ({ change }) => freeMe() || lead() || need(!(change && change.kind === 'currency' && !String(change.value || '').trim()), 'Give the currency a name.'),
     run: ({ change }) => {
       const label = constLabel(change);
       if (!demo()) {
@@ -1254,7 +1628,8 @@
       v: CC.VERSION, rs: (opts.seed >>> 0) || ((Date.now() & 0xffffffff) >>> 0) || 1, day: 0, startDay: 0, name: opts.communeName || 'Container Commune', start: opts.start,
       people: [], laws: [], nextLawId: 1, parties: [], nextPartyId: 1, plots: [], nextPlotId: 1, playerPlot: null, pending: [], nextEventId: 1,
       food: 90, water: 80, materials: 30, treasury: 50, containers: 4, buildings: {}, inst: { police: false, cameras: false },
-      gov: { type: 'founder', leader: PLAYER, council: [], term: 24, nextElection: null, conflict: 'newest', gate: 'vetted', tax: 0.1, exempt: false, since: 0 },
+      gov: { type: 'founder', leader: PLAYER, council: [], term: 24, nextElection: null, conflict: 'newest', gate: 'vetted', tax: 0.1, exempt: false, since: 0, wage: CC.DEFAULT_WAGE, salary: CC.DEFAULT_SALARY },
+      currency: 'scrip', repealed: [], owned: { aides: 0, guards: false, villa: false, clothes: false }, built: [], otToday: 0,
       legitimacy: 75, attention: 5, exposure: 0, secrets: [], sanctions: false, flags: {}, peakPop: 0,
       ap: 3, apMax: 3, apPenalty: 0, pdid: [], dayNotes: [], platform: {}, standing: false, campaign: 0, rigged: false, addressToday: false, rally: false,
       report: null, chronicle: [], history: [], over: null, lastElection: null,
@@ -1267,15 +1642,17 @@
     const s = baseState(opts);
     CC.useState(s);
     const mk = CC._people.makePerson;
-    const me = mk({ isPlayer: true, first: opts.first || 'Alex', last: opts.last || 'Rowe', age: 30, trade: 'organiser', traits: [], motive: 'others', accuracy: 70, founder: opts.start === 'found', arrived: 0, scrip: opts.start === 'found' ? 30 : 15 });
+    const me = mk({ isPlayer: true, first: opts.first || 'Alex', last: opts.last || 'Rowe', age: 30, trade: 'organiser', traits: [], motive: 'others', accuracy: 70, founder: opts.start === 'found', arrived: 0, scrip: opts.start === 'found' ? 30 : 15, sex: opts.sex || 'm', orient: opts.orient || 'bi' });
     me.needs = { food: 70, water: 70, belonging: 70, freedom: 70, purpose: 70, safety: 70 };
     const founding = opts.start === 'found';
     const nCouples = founding ? 6 : 10, nSingles = founding ? 7 : 9;
     const adults = [];
     let ti = 0;
     for (let i = 0; i < nCouples; i++) {
-      const a = mk({ founder: founding || chance(0.6), age: 22 + rnd() * 34, trade: ADULT_TRADES[ti++ % ADULT_TRADES.length], arrived: founding ? 0 : -Math.floor(rnd() * 40) - 25 });
-      const b = mk({ founder: a.founder, age: clamp(a.age + (rnd() - 0.5) * 10, 19, 80), trade: ADULT_TRADES[ti++ % ADULT_TRADES.length], arrived: a.arrived });
+      const sa = chance(0.5) ? 'm' : 'f', same = chance(0.1);
+      const a = mk({ founder: founding || chance(0.6), age: 22 + rnd() * 34, trade: ADULT_TRADES[ti++ % ADULT_TRADES.length], arrived: founding ? 0 : -Math.floor(rnd() * 40) - 25, sex: sa });
+      const b = mk({ founder: a.founder, age: clamp(a.age + (rnd() - 0.5) * 10, 19, 80), trade: ADULT_TRADES[ti++ % ADULT_TRADES.length], arrived: a.arrived, sex: same ? sa : sa === 'm' ? 'f' : 'm' });
+      a.orient = CC._people.fitOrient(a, b); b.orient = CC._people.fitOrient(a, b);
       CC._people.pair(a, b); adults.push(a, b);
       if (i < (founding ? 3 : 5)) { const kids = 1 + Math.floor(rnd() * 2); for (let k = 0; k < kids; k++) { const kid = CC._people.addChild(a, b, { age: 1 + rnd() * 14, arrived: a.arrived }); kid.founder = a.founder; } }
     }
@@ -1297,6 +1674,26 @@
       s.gov.type = 'founder'; s.gov.leader = PLAYER; s.legitimacy = 75;
       for (const c of npcs.slice(0, 6)) CC._people.befriend(c, me);
       log(`You founded ${s.name} with ${npcs.length} others.`, 'politics');
+      // the founding constitution costs nothing: it is how the commune starts
+      const k = opts.constitution || {};
+      if (CC.GOV[k.type]) s.gov.type = k.type;
+      if (CC.GATE[k.gate]) s.gov.gate = k.gate;
+      if (CC.CONFLICT[k.conflict]) s.gov.conflict = k.conflict;
+      for (const f of ['tax', 'wage', 'salary', 'term']) if (typeof k[f] === 'number' && isFinite(k[f])) s.gov[f] = k[f];
+      if (typeof k.exempt === 'boolean') s.gov.exempt = k.exempt;
+      if (opts.currency) s.currency = cleanCurrency(opts.currency);
+      if (s.gov.type === 'council' || s.gov.type === 'assembly') { s.gov.nextElection = Math.min(12, s.gov.term); s.standing = true; s.legitimacy = 82; }
+      // a founding council sits until the first election: you and the four settlers who think most of you
+      if (s.gov.type === 'council') s.gov.council = [PLAYER, ...npcs.filter((c) => c.age >= 18).sort((a, b) => b.opinion - a.opinion).slice(0, 4).map((c) => c.id)];
+      if (s.gov.type === 'dictatorship') { s.legitimacy = 55; for (const c of npcs) if (has(c, 'Idealist') || has(c, 'Rebellious')) { c.opinion -= 20; c.govt = c.opinion; } }
+      if (s.gov.exempt) for (const c of npcs) if (!has(c, 'Loyal')) { c.opinion -= 4; c.govt = c.opinion; }
+      for (const spec of (opts.laws || []).slice(0, 8)) {
+        if (!spec || !BEH[spec.beh] || !RULES[spec.rule] || CC.lawNameIssue(spec.name)) continue;
+        const L = CC._laws.buildLaw({ ...spec, by: PLAYER });
+        L.from = 0; L.passedDay = 0; L.id = s.nextLawId++; s.laws.push(L); s.stats.laws++;
+        log(`Founding law: “${L.name}”. ${CC.describeLaw(L)}`, 'law');
+      }
+      log(`The founding constitution: ${CC.GOV[s.gov.type].label}; ${CC.GATE[s.gov.gate].toLowerCase()}; work tax ${Math.round(s.gov.tax * 100)}%; ${constLabel({ kind: 'wage', value: s.gov.wage }).toLowerCase()}; ${constLabel({ kind: 'salary', value: s.gov.salary }).toLowerCase()}.`, 'politics');
     } else {
       s.name = opts.communeName || 'Steel Haven';
       s.buildings = { home: 18, garden: 3, tank: 3, canteen: 1, workshop: 1, clinic: 1, school: 1, hall: 1, bar: 1, lockup: 1, post: 1 };
@@ -1337,6 +1734,7 @@
       log(`You arrived at ${s.name}, invited by ${host.first} ${host.last}.`, 'you');
     }
     s.peakPop = here().length;
+    CC.syncBuilt();
     for (const c of here()) for (const L of s.laws) c.lawSupport[L.id] = CC.supportFor(c, L);
     s.report = { day: -1, headlines: [founding ? `Day one. You and ${npcs.length} others have moved into the containers. The yard is yours to shape.` : `You have arrived at ${s.name}, a commune of ${npcs.length}. You are a newcomer: no vote yet in anyone's mind, no friends but ${P(me.friends[0]).first}, and a council that was elected without you.`], justice: [], life: [], politics: [], mood: [], stats: {} };
     return s;
@@ -1345,5 +1743,22 @@
 
   // ───────────────────────── saving ─────────────────────────
   CC.serialize = () => JSON.stringify(S, (k, v) => (k.startsWith('_') ? undefined : v));
-  CC.load = (json) => { const s = typeof json === 'string' ? JSON.parse(json) : json; CC.useState(s); return s; };
+  CC.load = (json) => { const s = typeof json === 'string' ? JSON.parse(json) : json; CC.useState(s); migrate(s); return s; };
+  // bring a save from an older version up to date
+  function migrate(s) {
+    if (s.gov.wage == null) s.gov.wage = CC.DEFAULT_WAGE;
+    if (s.gov.salary == null) s.gov.salary = CC.DEFAULT_SALARY;
+    s.currency = s.currency || 'scrip'; s.repealed = s.repealed || []; s.otToday = s.otToday || 0;
+    s.owned = s.owned || { aides: 0, guards: false, villa: false, clothes: false };
+    const sexOf = (n) => (CC.FIRST_M.includes(n) ? 'm' : CC.FIRST_F.includes(n) ? 'f' : chance(0.15) ? 'x' : chance(0.5) ? 'm' : 'f');
+    for (const c of s.people) { if (!c.extra) c.extra = []; if (c.wage == null) c.wage = 0; if (!c.sex) c.sex = c.isPlayer ? 'm' : sexOf(c.first); }
+    for (const c of s.people) {
+      if (c.orient) continue;
+      const p = c.partner != null ? s.people[c.partner] : null;
+      c.orient = c.isPlayer ? 'bi' : p ? CC._people.fitOrient(c, p) : CC._people.randOrient(c.sex);
+    }
+    if (!s.built || !s.built.length) { s.built = []; }
+    CC.syncBuilt();
+    s.v = CC.VERSION;
+  }
 })(typeof window !== 'undefined' ? window : globalThis);

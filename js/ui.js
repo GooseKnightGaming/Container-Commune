@@ -12,7 +12,10 @@
   const draft = { name: 'Quiet Hours Edict', who: 'everyone', rule: 'ban', beh: 'music', enf: 'watch', pun: 'fine', amount: 3, method: 'firing', setting: 'private' };
 
   const $ = (id) => document.getElementById(id);
-  const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (m) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m]));
+  // the currency can be renamed: every 'scrip' on screen becomes whatever it is called now
+  const cur = (t) => { const c = S && S.currency; if (!c || c === 'scrip') return t; return t.replace(/\bscrip\b/gi, (m) => (m[0] === 'S' ? c.charAt(0).toUpperCase() + c.slice(1) : c)); };
+  const escRaw = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (m) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m]));
+  const esc = (s) => escRaw(cur(String(s == null ? '' : s)));
   const P = (id) => (id == null ? null : S.people[id]);
   const alive = (c) => c && (c.status === 'free' || c.status === 'detained');
   const isLeader = () => S.gov.leader === CC.PLAYER;
@@ -21,7 +24,7 @@
   const party = (id) => S.parties.find((p) => p.id === id && !p.dissolved);
   const R0 = (n) => Math.round(n);
 
-  const CHIP = { work: 'work', study: 'lessons', share: 'sharing food', hoard: 'hoarding water', trade: 'private trade', gather: 'meetings', worship: 'worship', music: 'loud music', drink: 'drinking', gamble: 'gambling', criticise: 'criticism', report: 'informing', steal: 'theft', protest: 'protest', organise: 'party work', weapon: 'weapons', uniform: 'the uniform', address: "leader's address", volunteer: 'care work', outside: 'talking to outsiders', partner: 'partnerships', child: 'having children', leave: 'leaving' };
+  const CHIP = CC.NOUN;
   const TRADE_COLOR = { gardener: '#3f7a4f', cook: '#c4512b', mechanic: '#5b6670', labourer: '#a8862b', medic: '#2f7f7a', teacher: '#b8892b', warden: '#2f5d8a', organiser: '#7a3b5e', artist: '#a2557c', trader: '#8a6a4a', child: '#8b98a1' };
   const STATUS_WORD = { detained: 'Lock-up', exiled: 'Exiled', executed: 'Executed', fled: 'Left', dead: 'Died', disappeared: 'Disappeared' };
 
@@ -37,7 +40,7 @@
     if (!msg) return;
     const t = document.createElement('div');
     t.className = 'toast' + (bad ? ' bad' : '');
-    t.textContent = msg;
+    t.textContent = cur(msg);
     $('toasts').appendChild(t);
     setTimeout(() => t.remove(), bad ? 3500 : 4500);
   }
@@ -69,7 +72,8 @@
       ['People', pop, Math.min(100, (pop / Math.max(1, CC.capacityHomes())) * 100), CC.crowding() > 1.15, `${pop} people, homes for ${CC.capacityHomes()}`],
       ['Food', R0(S.food), Math.min(100, (S.food / CC.foodCap()) * 100), days(S.food, foodPer) < 3, `About ${days(S.food, foodPer)} days of food`],
       ['Water', R0(S.water), Math.min(100, (S.water / CC.waterCap()) * 100), days(S.water, waterPer) < 3, `About ${days(S.water, waterPer)} days of water`],
-      ['Treasury', R0(S.treasury), Math.max(0, Math.min(100, S.treasury)), S.treasury < 0, 'Scrip in the commune treasury'],
+      ['Treasury', R0(S.treasury), Math.max(0, Math.min(100, S.treasury)), S.treasury < 0, cur('Scrip in the commune treasury')],
+      ['Wallet', R0(P(CC.PLAYER).scrip), Math.max(0, Math.min(100, P(CC.PLAYER).scrip)), false, cur('Your own scrip')],
       ['Approval', R0(ap), ap, ap < 35, 'How people feel about the government'],
       ['You', R0(st), st, st < 35, 'How people feel about you personally'],
       ['Fear', R0(fe), fe, false, 'Average fear'],
@@ -79,7 +83,7 @@
     let h = m.map(([k, v, w, low, tip]) => `<div class="meter${low ? ' low' : ''}" title="${esc(tip)}"><b>${k}</b><div class="v">${v}</div><div class="bar"><i style="width:${Math.max(0, Math.min(100, w))}%"></i></div></div>`).join('');
     if (S.exposure > 0 || S.secrets.length) h += `<div class="meter secret${S.exposure > 40 ? ' low' : ''}" title="Only you can see this: how close your secrets are to coming out"><b>Exposure</b><div class="v">${R0(S.exposure)}</div><div class="bar"><i style="width:${S.exposure}%"></i></div></div>`;
     $('meters').innerHTML = h;
-    $('ap').innerHTML = `ACTIONS ${Array.from({ length: S.apMax }, (_, i) => `<i class="${i < S.ap ? 'on' : ''}"></i>`).join('')}`;
+    $('ap').innerHTML = `ACTIONS ${Array.from({ length: Math.max(S.apMax, S.ap) }, (_, i) => `<i class="${i < S.ap ? 'on' : ''}${i >= S.apMax ? ' extra' : ''}"></i>`).join('')}`;
     $('end').disabled = !!S.over;
   }
 
@@ -94,8 +98,9 @@
     if (!S) return;
     renderHeader(); renderTabs();
     const main = $('main');
-    main.innerHTML = ({ today: viewToday, yard: viewPeople, laws: viewLaws, politics: viewPolitics, commune: viewCommune, chronicle: viewChronicle }[tab] || viewToday)();
+    main.innerHTML = ({ today: viewToday, yard: viewYard, people: viewPeople, laws: viewLaws, politics: viewPolitics, commune: viewCommune, chronicle: viewChronicle }[tab] || viewToday)();
     wire(main);
+    mountYards(main);
     renderDrawer();
   }
 
@@ -108,10 +113,15 @@
       for (const e of S.pending) {
         const v = CC.eventView(e);
         if (!v) continue;
-        h += `<div class="event"><h3>${esc(v.title)}</h3><p>${esc(v.text)}</p><div class="row">${v.options.map((o) => `<button type="button" class="btn${o.key === v.def ? '' : ''}" data-event="${e.id}" data-key="${o.key}">${esc(o.label)}</button>`).join('')}</div></div>`;
+        const noted = v.options.some((o) => o.note);
+        h += `<div class="event${v.proposal ? ' proposal' : ''}"><h3>${esc(v.title)}</h3><p>${esc(v.text)}</p>`;
+        h += noted ? `<div class="choices">${v.options.map((o) => `<div class="choice"><button type="button" class="btn${o.key === v.def ? '' : ' primaryish'}" data-event="${e.id}" data-key="${o.key}">${esc(o.label)}</button>${o.note ? `<p>${esc(o.note)}</p>` : ''}</div>`).join('')}</div>`
+          : `<div class="row">${v.options.map((o) => `<button type="button" class="btn" data-event="${e.id}" data-key="${o.key}">${esc(o.label)}</button>`).join('')}</div>`;
+        h += '</div>';
       }
       h += '</div></section>';
     }
+    h += `<section class="panel yardpanel"><h2><span>The yard</span><span class="r"><button type="button" class="linkish" data-tabgo="yard">Open the full map</button></span></h2>${yardBox(true)}</section>`;
     h += '<div class="cols">';
     // report
     h += '<section class="panel report"><h2>Report</h2>';
@@ -120,7 +130,7 @@
       const sec = (title, items, cls) => (items && items.length ? `<h3>${title}</h3><ul class="${cls || ''}">${items.map((x) => `<li>${esc(x)}</li>`).join('')}</ul>` : '');
       h += sec('Headlines', R.headlines, 'headlines') + sec('Politics', R.politics) + sec('Justice', R.justice) + sec('Life in the yard', R.life) + sec('Mood', R.mood);
       if (R.election) h += `<h3>Election</h3>${electionBars(R.election.results, R.election.type === 'council')}`;
-      if (R.stats && R.stats.shifts != null) h += `<p class="muted small" style="margin-top:12px">${R.stats.shifts} work shifts · +${R.stats.food} food · +${R.stats.water} water · +${R.stats.mat} materials · upkeep ${R.stats.upkeep} scrip</p>`;
+      if (R.stats && R.stats.shifts != null) h += `<p class="muted small" style="margin-top:12px">${esc(`${R.stats.shifts} work shifts · wages paid ${R.stats.wages || 0} scrip${R.stats.unpaid ? ` · ${R.stats.unpaid} shifts unpaid` : ''} · +${R.stats.food} food · +${R.stats.water} water · +${R.stats.mat} materials · upkeep ${R.stats.upkeep} scrip`)}</p>`;
     }
     h += '</section>';
     // your day
@@ -136,8 +146,65 @@
     if (me.partner != null) h += abtn('child', {});
     h += '</div></section>';
     h += `<section class="panel"><h2>Your situation</h2>${situation()}</section>`;
+    h += `<section class="panel"><h2><span>Your money</span><span class="r mono">${esc(R0(me.scrip) + ' scrip')}</span></h2>${wallet()}</section>`;
     h += '</div></div>';
     return h;
+  }
+  function wallet() {
+    const me = P(CC.PLAYER), o = S.owned || {};
+    const inc = [];
+    inc.push(`Wages: ${S.gov.wage ? `${R0(S.gov.wage * (1 - S.gov.tax) * 10) / 10} scrip a shift after tax` : 'none'}`);
+    if (isLeader()) inc.push(`Salary: ${S.gov.salary} scrip a day`);
+    const costs = (o.aides || 0) * CC.SHOP.aide.upkeep + (o.guards ? CC.SHOP.guards.upkeep : 0);
+    if (costs) inc.push(`Your staff cost ${costs} scrip a day`);
+    let h = `<p class="small muted" style="margin-bottom:10px">${esc(inc.join(' · '))}</p>`;
+    const have = [];
+    if (o.aides) have.push(`${o.aides} aide${o.aides > 1 ? 's' : ''}`);
+    if (o.guards) have.push('bodyguards');
+    if (o.villa) have.push('your own container');
+    if (o.clothes) have.push('good clothes');
+    if (have.length) h += `<p class="small" style="margin-bottom:10px">You have ${esc(have.join(', '))}.</p>`;
+    h += '<div class="acts">';
+    h += abtn('overtime', {}, `Pay for an extra action today (${CC.otPrice()} scrip)`);
+    h += abtn('hireAide', {}, `Hire an aide: +1 action every day (${CC.SHOP.aide.cost}, then ${CC.SHOP.aide.upkeep}/day)`);
+    if (o.aides) h += abtn('fireAide', {}, 'Let an aide go', 'small');
+    if (!o.guards) h += abtn('guards', {}, `Hire bodyguards (${CC.SHOP.guards.cost}, then ${CC.SHOP.guards.upkeep}/day)`); else h += abtn('dropGuards', {}, 'Dismiss your bodyguards', 'small');
+    if (!o.villa) h += abtn('villa', {}, `A container of your own (${CC.SHOP.villa.cost})`);
+    if (!o.clothes) h += abtn('clothes', {}, `Good clothes (${CC.SHOP.clothes.cost})`);
+    if (S.buildings.bar) h += abtn('round', {});
+    if (isLeader()) h += abtn('embezzle', {}, 'Help yourself to the treasury (up to 25)', 'danger');
+    h += '</div>';
+    h += `<p class="small muted" style="margin-top:8px">${esc('Aides: ' + CC.SHOP.aide.desc + ' Bodyguards: ' + CC.SHOP.guards.desc + ' Your own container: ' + CC.SHOP.villa.desc)} Gifts and bribes are on each person's page.</p>`;
+    return h;
+  }
+  // ───────────────────────── the yard map ─────────────────────────
+  function yardBox(compact) {
+    return `<div class="yardwrap${compact ? ' compact' : ''}"><canvas class="yardcv" data-yard="${compact ? 'compact' : 'full'}" aria-label="Map of the commune: buildings and people, replaying yesterday"></canvas><div class="ytip" hidden></div></div>`;
+  }
+  function mountYards(root) {
+    if (!window.CCYard) return;
+    root.querySelectorAll('canvas[data-yard]').forEach((cv) => {
+      window.CCYard.mount(cv, { compact: cv.dataset.yard === 'compact', colors: TRADE_COLOR, selected: selected, tip: cv.parentElement.querySelector('.ytip'), onPick: (id) => { selected = id; drawerOpen = true; renderDrawer(); } });
+    });
+  }
+  function viewYard() {
+    let h = `<section class="panel"><h2><span>The yard</span><span class="r">${esc(`${CC.containersUsed() + S.containers} containers · homes for ${CC.capacityHomes()} · ${S.people.filter(alive).length} people`)}</span></h2>`;
+    h += `<div class="row yardctl"><button type="button" class="btn small" id="ypause">${window.CCYard && window.CCYard.paused ? 'Play' : 'Pause'}</button><label class="small muted" for="ycolor">Colour people by</label><select id="ycolor" class="plain" style="width:auto">${[['trade', 'Trade'], ['party', 'Party'], ['opinion', 'What they think of you'], ['mood', 'How they are doing']].map(([k, l]) => `<option value="${k}"${window.CCYard && window.CCYard.colorBy === k ? ' selected' : ''}>${l}</option>`).join('')}</select></div>`;
+    h += yardBox(false);
+    h += `<div class="legend small">${legend()}</div>`;
+    h += '<p class="small muted" style="margin-top:6px">The map replays yesterday: everyone leaves home at dawn, does their two things, and goes home at dusk. New buildings appear as soon as they are fitted out. Hover for names; click someone to open their page.</p>';
+    h += '<div class="small" id="ycensus" style="margin-top:8px"></div></section>';
+    return h;
+  }
+  function legend() {
+    const by = window.CCYard ? window.CCYard.colorBy : 'trade';
+    let items = [];
+    if (by === 'trade') items = Object.entries(TRADE_COLOR).map(([k, c]) => [c, k === 'child' ? 'child' : CC.TRADES[k].label]);
+    if (by === 'party') items = S.parties.filter((p) => !p.dissolved).map((p) => [p.color, p.name]).concat([['#9aa3a9', 'no party']]);
+    if (by === 'opinion') items = [['var(--good)', 'likes you'], ['#9aa3a9', 'unsure'], ['var(--bad)', 'dislikes you']];
+    if (by === 'mood') items = [['var(--good)', 'doing well'], ['var(--warn)', 'getting by'], ['var(--bad)', 'struggling']];
+    items.push(['transparent', 'you (ringed)']);
+    return items.map(([c, l]) => `<span><i style="background:${c}${c === 'transparent' ? ';border:2px solid var(--accent)' : ''}"></i>${esc(l)}</span>`).join('');
   }
   function situation() {
     const me = P(CC.PLAYER);
@@ -150,9 +217,10 @@
     h += `<dt>Government</dt><dd>${esc(CC.GOV[S.gov.type].label)}${lead && !lead.isPlayer ? `, led by <button type="button" class="linkish" data-person="${lead.id}">${esc(name(lead))}</button>` : ''}</dd>`;
     if (demo() && S.gov.nextElection != null) h += `<dt>Election</dt><dd>${S.gov.nextElection - S.day <= 0 ? 'Tonight' : `In ${S.gov.nextElection - S.day} day${S.gov.nextElection - S.day === 1 ? '' : 's'}`}${S.standing || p ? '' : ' · you are not standing'}</dd>`;
     h += `<dt>Party</dt><dd>${p ? `<span class="chip party" style="--pc:${p.color}">${esc(p.name)}</span>${p.leader === CC.PLAYER ? ' (you lead it)' : ''}` : 'None'}</dd>`;
-    h += `<dt>Partner</dt><dd>${me.partner != null ? `<button type="button" class="linkish" data-person="${me.partner}">${esc(name(P(me.partner)))}</button>` : 'None'}${me.children.length ? ` · ${me.children.length} child${me.children.length > 1 ? 'ren' : ''}` : ''}</dd>`;
+    const myP = CC.partnersOf(me).filter((id) => alive(P(id)));
+    h += `<dt>Partner${myP.length > 1 ? 's' : ''}</dt><dd>${myP.length ? myP.map((id) => `<button type="button" class="linkish" data-person="${id}">${esc(name(P(id)))}</button>`).join(', ') : 'None'}${me.children.length ? ` · ${me.children.length} child${me.children.length > 1 ? 'ren' : ''}` : ''}</dd>`;
     h += `<dt>Friends</dt><dd>${me.friends.filter((f) => alive(P(f))).length}</dd>`;
-    h += `<dt>Your scrip</dt><dd class="mono">${R0(me.scrip)}</dd>`;
+    h += `<dt>Your ${esc('scrip')}</dt><dd class="mono">${R0(me.scrip)}</dd>`;
     if (plot) h += `<dt>Your plot</dt><dd>${plot.members.filter((id) => P(id) && P(id).status === 'free').length} plotters · see Politics</dd>`;
     if (me.novote > 0) h += '<dt>Vote</dt><dd>You have lost the vote</dd>';
     h += '</dl>';
@@ -201,17 +269,19 @@
     if (p) tags.push(`<span class="chip party" style="--pc:${p.color}" title="${esc(p.name)}">${esc(p.name.replace(/^The /, '').split(' ')[0])}</span>`);
     if (S.gov.leader === c.id) tags.push('<span class="chip warn">Leader</span>');
     else if (S.gov.council.includes(c.id)) tags.push('<span class="chip">Council</span>');
-    if (c.partner != null && c.partner === CC.PLAYER) tags.push('<span class="chip good">Partner</span>');
+    if (CC.partnersOf(c).includes(CC.PLAYER)) tags.push('<span class="chip good">Partner</span>');
     if (!c.founder && S.day - c.arrived < CC.YEAR && !c.bornHere && !c.isPlayer) tags.push('<span class="chip">New</span>');
     if (S.playerPlot != null && c.plot === S.playerPlot && !c.isPlayer) tags.push('<span class="chip bad">Plotter</span>');
     const did = c.status === 'free' && c.today && c.today.length ? [...new Set(c.today)].map((b) => CC.BEH[b].short).join(' · ') : '';
     const gone = c.status === 'free' ? '' : `<div class="gone">${c.status === 'detained' ? '<span>Lock-up</span>' : STATUS_WORD[c.status] || c.status}</div>`;
     const mini = c.isPlayer ? '' : `<div class="mini"><span>you</span><div class="scale"><i style="left:${(c.opinion + 100) / 2}%"></i></div><span>govt</span><div class="scale"><i style="left:${(regime(c) + 100) / 2}%"></i></div></div>`;
     return `<button type="button" class="box st-${c.status}${c.isPlayer ? ' you' : ''}${selected === c.id ? ' sel' : ''}" data-person="${c.id}" style="--c:${TRADE_COLOR[c.age < 16 ? 'child' : c.trade] || '#777'}" aria-label="${esc(name(c))}">
-      <div class="doors"></div><div class="body"><div class="nm">${esc(name(c))}</div><div class="role">${Math.floor(c.age)} · ${c.age < 16 ? 'child' : esc(c.isPlayer ? (isLeader() ? 'leader' : 'citizen') : (CC.TRADES[c.trade] ? CC.TRADES[c.trade].label : c.trade))}${c.retired ? ' (retired)' : ''}</div>
+      <div class="doors"></div><div class="body"><div class="nm">${esc(name(c))}</div><div class="role">${Math.floor(c.age)} · ${sexWord(c)} · ${c.age < 16 ? 'child' : esc(c.isPlayer ? (isLeader() ? 'leader' : 'citizen') : (CC.TRADES[c.trade] ? CC.TRADES[c.trade].label : c.trade))}${c.retired ? ' (retired)' : ''}</div>
       <div class="tags">${tags.join('')}</div>${mini}<div class="did">${esc(did)}</div></div>${gone}</button>`;
   }
   const regime = (c) => (isLeader() ? c.opinion : c.govt);
+  const sexWord = (c) => (c.age < 16 ? (CC.SEX_KID[c.sex] || 'child') : CC.SEX[c.sex] || '');
+  const attractWord = (c) => (c.orient === 'bi' ? 'anyone' : c.orient === 'gay' ? (c.sex === 'm' ? 'men' : c.sex === 'f' ? 'women' : 'people like them') : c.sex === 'm' ? 'women' : c.sex === 'f' ? 'men' : 'anyone');
 
   // ───────────────────────── drawer ─────────────────────────
   function renderDrawer() {
@@ -222,7 +292,7 @@
     const p = party(c.party);
     const link = (id) => `<button type="button" class="linkish" data-person="${id}">${esc(P(id) ? (P(id).isPlayer ? 'You' : P(id).first) : '?')}</button>`;
     let h = `<button type="button" class="btn small close" data-close="1">Close</button><div class="who"><h3>${esc(name(c))}</h3>`;
-    h += `<div class="sub">${Math.floor(c.age)} years old · ${c.age < 16 ? 'child' : c.isPlayer ? (isLeader() ? 'leader' : 'citizen') : esc(CC.TRADES[c.trade] ? CC.TRADES[c.trade].label : c.trade)}${c.founder ? ' · founding member' : ''}${!c.founder && !c.bornHere && S.day - c.arrived < CC.YEAR ? ' · newcomer' : ''}${c.bornHere ? ' · born here' : ''}${c.status !== 'free' ? ` · <b>${esc(STATUS_WORD[c.status] || c.status)}</b>` : ''}</div></div>`;
+    h += `<div class="sub">${Math.floor(c.age)} years old · ${c.age >= 16 ? esc(CC.SEX[c.sex]) + ' · ' : ''}${c.age < 16 ? esc(sexWord(c)) : c.isPlayer ? (isLeader() ? 'leader' : 'citizen') : esc(CC.TRADES[c.trade] ? CC.TRADES[c.trade].label : c.trade)}${c.founder ? ' · founding member' : ''}${!c.founder && !c.bornHere && S.day - c.arrived < CC.YEAR ? ' · newcomer' : ''}${c.bornHere ? ' · born here' : ''}${c.status !== 'free' ? ` · <b>${esc(STATUS_WORD[c.status] || c.status)}</b>` : ''}</div></div>`;
     h += '<dl class="kv">';
     if (!c.isPlayer) {
       h += `<dt>Motive</dt><dd><b>${esc(CC.MOTIVE[c.motive].name)}.</b> ${esc(CC.MOTIVE[c.motive].blurb)}</dd>`;
@@ -232,11 +302,14 @@
       if (!isLeader()) h += `<dt>Of the govt</dt><dd>${feel(c.govt)} <span class="muted mono">(${R0(c.govt)})</span></dd>`;
       h += `<dt>Fear</dt><dd class="mono">${R0(c.fear)}</dd>`;
       h += `<dt>Health</dt><dd class="mono">${R0(c.health)}${c.ill ? ' · ill' : ''}</dd>`;
+      if (c.age >= 16) h += `<dt>Drawn to</dt><dd>${esc(attractWord(c))} <span class="muted">(${esc(CC.ORIENT[c.orient])})</span></dd>`;
+      if (c.age >= 16 && c.status === 'free') h += `<dt>Wages</dt><dd>${c.unpaid ? '<b>Went unpaid yesterday</b>' : c.wage ? esc(`Earned ${R0(c.wage * 10) / 10} scrip yesterday`) : 'Did no paid work yesterday'}</dd>`;
     }
-    h += `<dt>Scrip</dt><dd class="mono">${R0(c.scrip)}</dd>`;
+    h += `<dt>${esc('Scrip')}</dt><dd class="mono">${R0(c.scrip)}</dd>`;
     h += `<dt>Party</dt><dd>${p ? `<span class="chip party" style="--pc:${p.color}">${esc(p.name)}</span>${p.leader === c.id ? ' leader' : ''}` : 'None'}</dd>`;
     const fam = [];
-    if (c.partner != null) fam.push(`partner ${link(c.partner)}`);
+    const ps = CC.partnersOf(c);
+    if (ps.length) fam.push(`${ps.length > 1 ? 'partners' : 'partner'} ${ps.map(link).join(', ')}`);
     if (c.parents.length) fam.push(`parents ${c.parents.map(link).join(', ')}`);
     if (c.children.length) fam.push(`children ${c.children.map(link).join(', ')}`);
     if (fam.length) h += `<dt>Family</dt><dd>${fam.join('<br>')}</dd>`;
@@ -259,10 +332,12 @@
     const id = c.id;
     const me = P(CC.PLAYER);
     let h = '<h4>Act</h4><div class="acts">';
-    h += '<div class="grp">Personal</div>' + abtn('befriend', { id }) + abtn('help', { id });
-    if (c.age >= 18 && c.partner == null && me.partner == null) h += abtn('court', { id });
+    h += '<div class="grp">Personal</div>' + abtn('befriend', { id }) + abtn('help', { id }) + abtn('gift', { id });
+    const mine = CC.partnersOf(me);
+    if (mine.includes(id)) h += abtn('divorce', { id }, 'End your partnership', 'danger');
+    else if (c.age >= 18) h += abtn('court', { id }, mine.length || CC.partnersOf(c).length ? 'Ask them to be another partner' : 'Ask them to be your partner');
     if (party(me.party)) h += abtn('invite', { id });
-    h += '<div class="grp">In the shadows</div>' + abtn('bribe', { id }) + abtn('threaten', { id }) + abtn('smear', { id });
+    h += '<div class="grp">In the shadows</div>' + abtn('bribe', { id }) + abtn('bribe', { id, amt: 30 }, 'Bribe them heavily (30 scrip)') + abtn('threaten', { id }) + abtn('smear', { id });
     if (S.playerPlot != null) h += abtn('recruit', { id });
     if (isLeader()) {
       h += '<div class="grp">As leader</div>';
@@ -285,7 +360,8 @@
     h += '</div>';
     return h;
   }
-  const opt = (pairs, cur) => pairs.map(([k, l, dis]) => `<option value="${esc(k)}"${k === cur ? ' selected' : ''}${dis ? ' disabled' : ''}>${esc(l)}</option>`).join('');
+  const opt = (pairs, sel) => pairs.map(([k, l, dis]) => `<option value="${esc(k)}"${k === sel ? ' selected' : ''}${dis ? ' disabled' : ''}>${esc(l)}</option>`).join('');
+  const WAGES = [0, 1, 2, 3, 4, 5, 8], SALARIES = [0, 2, 5, 10, 20];
   function builder() {
     const B = CC.BEH[draft.beh];
     const rules = CC.rulesFor(draft.beh);
@@ -302,7 +378,8 @@
       if (draft.pun === 'execution') s += ` by <select id="b-method" aria-label="Method">${opt(Object.entries(CC.METHODS), draft.method)}</select> <select id="b-setting" aria-label="Where">${opt(Object.entries(CC.SETTINGS), draft.setting)}</select>`;
     }
     s += '.';
-    let h = `<label class="field" style="margin-bottom:10px"><span>Name</span><input id="b-name" class="plain" type="text" maxlength="48" value="${esc(draft.name)}"></label>`;
+    const issue = CC.lawNameIssue(draft.name);
+    let h = `<label class="field" style="margin-bottom:10px"><span>Name</span><input id="b-name" class="plain${issue ? ' invalid' : ''}" type="text" maxlength="48" value="${escRaw(draft.name)}" aria-describedby="b-namewarn"${issue ? ' aria-invalid="true"' : ''}></label><div id="b-namewarn" class="namewarn" role="status"${issue ? '' : ' hidden'}>${esc(issue || '')}</div>`;
     h += `<div class="sentence">${s}</div>`;
     h += `<div class="forecast">${forecast()}</div>`;
     const label = isLeader() ? (demo() ? `Put it to the ${S.gov.type === 'council' ? 'council' : 'assembly'}` : 'Decree this law') : S.gov.type === 'council' ? 'Ask a councillor to propose it' : S.gov.type === 'assembly' ? 'Put it to the assembly' : 'Petition the ruler';
@@ -316,6 +393,12 @@
       ['One Child Rule', { who: 'everyone', rule: 'ration', beh: 'child', enf: 'wardens', pun: 'bigfine' }],
       ['No One Leaves', { who: 'everyone', rule: 'ban', beh: 'leave', enf: 'wardens', pun: 'longdet' }],
       ['Uniform Code', { who: 'everyone', rule: 'require', beh: 'uniform', enf: 'watch', pun: 'shaming' }],
+      ['Decency Code', { who: 'everyone', rule: 'ban', beh: 'naked', enf: 'watch', pun: 'fine' }],
+      ['Free Body Order', { who: 'adults', rule: 'require', beh: 'naked', enf: 'watch', pun: 'warning' }],
+      ['Love Is Love Act', { who: 'everyone', rule: 'reward', beh: 'samesex' }],
+      ['Natural Family Edict', { who: 'everyone', rule: 'ban', beh: 'samesex', enf: 'wardens', pun: 'detention' }],
+      ['Open Hearts Charter', { who: 'adults', rule: 'reward', beh: 'polygamy' }],
+      ['Sacred Bond Act', { who: 'everyone', rule: 'ban', beh: 'divorce', enf: 'wardens', pun: 'bigfine' }],
     ];
     h += `<div class="presets" style="margin-top:12px"><span>Examples:</span>${PRE.map(([n], i) => `<button type="button" data-preset="${i}">${esc(n)}</button>`).join('')}</div>`;
     builder.PRE = PRE;
@@ -331,8 +414,9 @@
     const out = [];
     out.push(`<div>Applies to <b>${affected}</b> ${affected === 1 ? 'person' : 'people'}. Likely backed by <b>${yes} of ${adults.length}</b> adults.${sup.length && sup[0].s < -20 ? ` Strongest against: ${esc(sup[0].c.first)}.` : ''}${sup.length && sup[sup.length - 1].s > 20 ? ` Strongest for: ${esc(sup[sup.length - 1].c.first)}.` : ''}</div>`);
     if (demo()) {
-      const v = CC.voteForecast(draft);
-      if (v) out.push(`<div>Vote forecast in the ${S.gov.type === 'council' ? 'council' : 'assembly'}: <b>${v.yes} for, ${v.no} against</b>.</div>`);
+      const proposer = isLeader() ? CC.PLAYER : null;
+      const v = CC.voteDetail(draft, { proposer, by: CC.PLAYER });
+      if (v) out.push(voteBlock(v));
     }
     if (CC.RULES[draft.rule].violation) {
       const cr = CC.catchRate(L);
@@ -348,8 +432,24 @@
     }
     return out.join('');
   }
+  // how each councillor (or each party in the assembly) is likely to vote
+  function voteBlock(v) {
+    let h = `<div><b>${S.gov.type === 'council' ? 'Council' : 'Assembly'} forecast: ${v.yes} for, ${v.no} against${v.youVote ? ', plus your vote' : ''}.</b>`;
+    if (v.type === 'council') {
+      h += `<ul class="votes">${v.rows.map((r) => r.you ? '<li><span class="vlean you">You</span> <b>You</b> <span class="muted">your vote</span></li>' : `<li><span class="vlean ${r.score > 0 ? 'for' : 'against'}">${esc(r.lean)}</span> <button type="button" class="linkish" data-person="${r.id}">${esc(r.name)}</button>${r.party ? ` <span class="chip party" style="--pc:${r.color}">${esc(r.party.replace(/^The /, '').split(' ')[0])}</span>` : ''}${r.why ? ` <span class="muted">${esc(r.why)}</span>` : ''}</li>`).join('')}</ul>`;
+    } else {
+      h += `<ul class="votes">${v.groups.map((g) => `<li>${g.color ? `<span class="chip party" style="--pc:${g.color}">${esc(g.name)}</span>` : `<b>${esc(g.name)}</b>`} <span class="mono">${g.yes} for · ${g.no} against</span></li>`).join('')}</ul>`;
+    }
+    h += '<span class="small muted">A forecast, not a promise: on the day, some people change their minds.</span></div>';
+    return h;
+  }
   function statute() {
-    if (!S.laws.length) return '<p class="empty">No laws. Anything goes.</p>';
+    const gone = (S.repealed || []).slice().reverse();
+    const repealedHtml = gone.length ? `<div class="sect" style="margin-top:16px">Repealed</div><div class="stack">${gone.map((L) => {
+      const by = L.repealedBy == null ? '' : L.repealedBy === CC.PLAYER ? ' by you' : P(L.repealedBy) ? ' by ' + P(L.repealedBy).first : '';
+      return `<article class="law repealed"><div class="stamp" aria-hidden="true">Repealed</div><h3><span>${esc(L.name)}</span></h3><p>${esc(L.text || CC.describeLaw(L))}</p><div class="small muted">In force from day ${L.from + 1}. Repealed on day ${L.repealedDay + 1}${esc(by)}.</div></article>`;
+    }).join('')}</div>` : '';
+    if (!S.laws.length) return '<p class="empty">No laws. Anything goes.</p>' + repealedHtml;
     return '<div class="stack">' + S.laws.slice().reverse().map((L) => {
       const p = CC.lawPopularity(L);
       const pending = !CC.active({ ...L, from: L.from }) && S.day < L.from;
@@ -359,11 +459,11 @@
         if (S.gov.conflict === 'both') st.push(`<div class="status bad">Contradicts “${esc(x.law.name)}”: nobody can obey both</div>`);
         else if (x.winner !== L) st.push(`<div class="status">Overridden by “${esc(x.law.name)}” for ${x.group.length} people</div>`);
       }
-      const by = L.by == null ? 'before your time' : L.by === CC.PLAYER ? 'you' : P(L.by) ? P(L.by).first : 'a former leader';
+      const by = (L.by == null ? 'before your time' : L.by === CC.PLAYER ? 'you' : P(L.by) ? P(L.by).first : 'a former leader') + (L.proposedBy != null && L.proposedBy !== L.by && P(L.proposedBy) ? `, proposed by ${P(L.proposedBy).first}` : '');
       const yest = !pending && CC.RULES[L.rule].violation ? `<div class="small muted">Yesterday: broken ${L.brokenToday}, caught ${L.caughtToday}. Passed by ${esc(by)}.</div>` : `<div class="small muted">Passed by ${esc(by)}.</div>`;
       const rlabel = isLeader() ? (demo() ? 'Propose repeal' : 'Repeal') : 'Push for repeal';
       return `<article class="law${pending ? ' pending' : ''}"><h3><span>${esc(L.name)}</span>${abtn('repealLaw', { id: L.id }, rlabel, 'small')}</h3><p>${esc(CC.describeLaw(L))}</p><div class="support"><span>${p.pct}% for</span><div class="track" aria-hidden="true"><i style="width:${p.pct}%"></i></div><span>${p.yes}/${p.total}</span></div>${st.join('')}${yest}</article>`;
-    }).join('') + '</div>';
+    }).join('') + '</div>' + repealedHtml;
   }
   function constitution() {
     const g = S.gov;
@@ -372,14 +472,17 @@
       ['tax', 'Work tax', [0, 0.05, 0.1, 0.15, 0.2, 0.3, 0.5].map((v) => [String(v), `${R0(v * 100)}%`]), String(g.tax)],
       ['conflict', 'When laws contradict', Object.entries(CC.CONFLICT), g.conflict],
       ['exempt', 'The leader and the law', [['false', 'The leader is bound by the law'], ['true', 'The leader is above the law']], String(g.exempt)],
+      ['wage', 'Wage per shift (from the treasury)', WAGES.map((v) => [String(v), v ? `${v} scrip` : 'Unpaid']), String(g.wage)],
+      ['salary', "The leader's salary", SALARIES.map((v) => [String(v), v ? `${v} scrip a day` : 'None']), String(g.salary)],
     ];
     if (demo()) rows.push(['term', 'Elections every', [12, 24, 48].map((v) => [String(v), `${v} days`]), String(g.term)]);
     let h = '<div class="consti">';
     for (const [k, label, opts, cur] of rows) {
       h += `<div class="line"><label class="field"><span>${label}</span><select class="plain" id="c-${k}"${isLeader() ? '' : ' disabled'}>${opt(opts, cur)}</select></label>${isLeader() ? `<button type="button" class="btn" data-const="${k}"${S.ap < 1 ? ' disabled' : ''}>${demo() ? 'Propose' : 'Decree'}<span class="cost">1 AP</span></button>` : ''}</div>`;
     }
+    h += `<div class="line"><label class="field"><span>Name of the currency</span><input class="plain" id="c-currency" maxlength="20" value="${escRaw(S.currency || 'scrip')}"${isLeader() ? '' : ' disabled'}></label>${isLeader() ? `<button type="button" class="btn" data-const="currency"${S.ap < 1 ? ' disabled' : ''}>${demo() ? 'Propose' : 'Decree'}<span class="cost">1 AP</span></button>` : ''}</div>`;
     h += '</div>';
-    h += `<p class="small muted" style="margin-top:10px">${isLeader() ? (demo() ? 'Changes go to a vote. ' : 'You can decree changes, but unpopular ones cost legitimacy. ') : 'Only the leader can change the constitution. '}New laws take effect the day after they pass.</p>`;
+    h += `<p class="small muted" style="margin-top:10px">${isLeader() ? (demo() ? 'Changes go to a vote. ' : 'You can decree changes, but unpopular ones cost legitimacy. ') : 'Only the leader can change the constitution. '}${esc(`Each shift earns the commune ${CC.SHIFT_VALUE} scrip; wages above that drain the treasury, wages below it fill it.`)} New laws take effect the day after they pass.</p>`;
     return h;
   }
 
@@ -448,7 +551,7 @@
       } else h += `<div class="row">${abtn('plot', {}, null, 'danger')}</div>`;
     } else {
       h += '<div class="sect">Institutions</div><div class="stack">';
-      for (const [k, v] of Object.entries(CC.INSTITUTIONS)) h += `<div class="spread"><span><b>${esc(v.label)}</b> <span class="small muted">${esc(v.desc)} ${v.cost} scrip, then ${v.upkeep} a day.</span></span>${S.inst[k] ? abtn('disband', { inst: k }, 'Disband', 'small') : abtn('establish', { inst: k }, 'Establish', 'small')}</div>`;
+      for (const [k, v] of Object.entries(CC.INSTITUTIONS)) h += `<div class="spread"><span><b>${esc(v.label)}</b> <span class="small muted">${esc(`${v.desc} ${v.cost} scrip, then ${v.upkeep} a day.`)}</span></span>${S.inst[k] ? abtn('disband', { inst: k }, 'Disband', 'small') : abtn('establish', { inst: k }, 'Establish', 'small')}</div>`;
       h += '</div>';
     }
     h += `<div class="row" style="margin-top:14px">${abtn('walkAway', {}, isLeader() ? 'Hand over and leave the commune' : 'Leave the commune for good', 'danger small')}</div></section>`;
@@ -460,20 +563,15 @@
   function viewCommune() {
     let h = '<div class="cols">';
     // map
-    let blocks = '';
-    for (const [k, n] of Object.entries(S.buildings)) {
-      const B = CC.BUILDINGS[k];
-      for (let i = 0; i < n; i++) blocks += `<div class="ctr" style="--c:${B.color};width:${B.size * 44 + (B.size - 1) * 4}px;${k === 'clinic' ? 'color:#1b2126;text-shadow:none' : ''}" title="${esc(B.label)}">${esc(B.short || B.label)}</div>`;
-    }
-    for (let i = 0; i < S.containers; i++) blocks += '<div class="ctr spare" style="width:44px" title="Spare container">spare</div>';
-    h += `<section class="panel" style="grid-column:1/-1"><h2><span>The yard</span><span class="r">${CC.containersUsed() + S.containers} containers · homes for ${CC.capacityHomes()} · ${S.people.filter(alive).length} people</span></h2><div class="yardmap">${blocks}</div></section>`;
+    h += `<section class="panel" style="grid-column:1/-1"><h2><span>The yard</span><span class="r">${CC.containersUsed() + S.containers} containers · homes for ${CC.capacityHomes()} · ${S.people.filter(alive).length} people</span></h2>${yardBox(true)}</section>`;
     // resources and trade
     const pr = CC.price();
     h += `<section class="panel"><h2>Stores and trade</h2><div class="stats" style="margin-bottom:12px">
       <div class="stat"><b>Food</b><span>${R0(S.food)}</span></div><div class="stat"><b>Water</b><span>${R0(S.water)}</span></div><div class="stat"><b>Materials</b><span>${R0(S.materials)}</span></div><div class="stat"><b>Treasury</b><span>${R0(S.treasury)}</span></div><div class="stat"><b>Spare containers</b><span>${S.containers}</span></div><div class="stat"><b>Upkeep / day</b><span>${R0(S._upkeep || 0)}</span></div></div>`;
     if (S.sanctions) h += '<p class="small" style="color:var(--bad);margin-bottom:8px">Sanctions: everything costs 60% more.</p>';
     h += isLeader() ? `<div class="row">${abtn('buyFood', {}, `Buy 10 food (${R0(8 * pr)} scrip)`)}${abtn('buyWater', {}, `Buy 10 water (${R0(5 * pr)} scrip)`)}${abtn('buyContainer', {}, `Buy a container (${R0(20 * pr)} scrip)`)}${abtn('sellMat', {}, `Sell 5 materials (${R0(6 / pr)} scrip)`)}</div>` : '<p class="small muted">Only the leader can trade on behalf of the commune.</p>';
-    h += `<p class="small muted" style="margin-top:10px">Work tax ${R0(S.gov.tax * 100)}% · gate: ${esc(CC.GATE[S.gov.gate].toLowerCase())}</p></section>`;
+    const lastR = S.report && S.report.stats ? S.report.stats : {};
+    h += `<p class="small muted" style="margin-top:10px">${esc(`Wage ${S.gov.wage} scrip a shift · work tax ${R0(S.gov.tax * 100)}% · leader's salary ${S.gov.salary} a day · yesterday's wage bill ${lastR.wages || 0}${lastR.unpaid ? `, ${lastR.unpaid} shifts unpaid` : ''} · gate: ${CC.GATE[S.gov.gate].toLowerCase()}`)}</p></section>`;
     // history
     h += `<section class="panel"><h2>Over time</h2>${spark()}<div class="stats" style="margin-top:12px"><div class="stat"><b>Births</b><span>${S.stats.births}</span></div><div class="stat"><b>Deaths</b><span>${S.stats.deaths}</span></div><div class="stat"><b>Arrivals</b><span>${S.stats.arrivals}</span></div><div class="stat"><b>Departures</b><span>${S.stats.departures}</span></div><div class="stat"><b>Executions</b><span>${S.stats.executions}</span></div><div class="stat"><b>Laws passed</b><span>${S.stats.laws}</span></div></div></section>`;
     // build
@@ -525,7 +623,10 @@
     root.querySelectorAll('[data-close]').forEach((b) => b.addEventListener('click', () => { drawerOpen = false; selected = window.matchMedia('(max-width: 1060px)').matches ? selected : CC.PLAYER; render(); }));
     root.querySelectorAll('[data-event]').forEach((b) => b.addEventListener('click', () => { const msg = CC.resolveEvent(Number(b.dataset.event), b.dataset.key); toast(msg); save(); render(); if (S.over) showEnd(); }));
     root.querySelectorAll('[data-pfilter]').forEach((b) => b.addEventListener('click', () => { peopleFilter = b.dataset.pfilter; render(); }));
-    root.querySelectorAll('[data-pfilter-go]').forEach((b) => b.addEventListener('click', () => { peopleFilter = b.dataset.pfilterGo; tab = 'yard'; render(); }));
+    root.querySelectorAll('[data-pfilter-go]').forEach((b) => b.addEventListener('click', () => { peopleFilter = b.dataset.pfilterGo; tab = 'people'; render(); }));
+    root.querySelectorAll('[data-tabgo]').forEach((b) => b.addEventListener('click', () => { tab = b.dataset.tabgo; render(); window.scrollTo({ top: 0 }); }));
+    const yp = root.querySelector('#ypause'); if (yp) yp.addEventListener('click', () => { window.CCYard.setPaused(!window.CCYard.paused); yp.textContent = window.CCYard.paused ? 'Play' : 'Pause'; });
+    const yc = root.querySelector('#ycolor'); if (yc) yc.addEventListener('change', () => { window.CCYard.setColorBy(yc.value); const lg = root.querySelector('.legend'); if (lg) lg.innerHTML = legend(); });
     root.querySelectorAll('[data-cfilter]').forEach((b) => b.addEventListener('click', () => { chronFilter = b.dataset.cfilter; render(); }));
     root.querySelectorAll('[data-plat]').forEach((b) => b.addEventListener('click', () => { CC.setPlatform(b.dataset.plat, Number(b.dataset.v)); save(); render(); }));
     const ps = root.querySelector('#psort'); if (ps) ps.addEventListener('change', () => { peopleSort = ps.value; render(); });
@@ -535,11 +636,18 @@
     // law builder
     const bind = (id, key, num) => { const el = root.querySelector('#' + id); if (el) el.addEventListener('change', () => { draft[key] = num ? Number(el.value) : el.value; refreshBuilder(); }); };
     bind('b-who', 'who'); bind('b-rule', 'rule'); bind('b-beh', 'beh'); bind('b-amount', 'amount', true); bind('b-enf', 'enf'); bind('b-pun', 'pun'); bind('b-method', 'method'); bind('b-setting', 'setting');
-    const bn = root.querySelector('#b-name'); if (bn) bn.addEventListener('input', () => { draft.name = bn.value; const btn = root.querySelector('[data-act="proposeLaw"]'); if (btn) btn.dataset.args = JSON.stringify({ spec: { ...draft } }); });
-    root.querySelectorAll('[data-preset]').forEach((b) => b.addEventListener('click', () => { const [n, spec] = builder.PRE[Number(b.dataset.preset)]; Object.assign(draft, { amount: 3, enf: 'watch', pun: 'fine', method: 'firing', setting: 'private' }, spec, { name: n }); refreshBuilder(); }));
+    const bn = root.querySelector('#b-name'); if (bn) bn.addEventListener('input', () => {
+      draft.name = bn.value;
+      const issue = CC.lawNameIssue(draft.name);
+      bn.classList.toggle('invalid', !!issue); if (issue) bn.setAttribute('aria-invalid', 'true'); else bn.removeAttribute('aria-invalid');
+      const w = root.querySelector('#b-namewarn'); if (w) { w.hidden = !issue; w.textContent = issue || ''; }
+      const btn = root.querySelector('[data-act="proposeLaw"]');
+      if (btn) { btn.dataset.args = JSON.stringify({ spec: { ...draft } }); const why = CC.can('proposeLaw', { spec: { ...draft } }); btn.disabled = !!why; if (why) btn.title = why; else btn.removeAttribute('title'); }
+    });
+    root.querySelectorAll('[data-preset]').forEach((b) => b.addEventListener('click', () => { const [n, spec] = builder.PRE[Number(b.dataset.preset)]; Object.assign(draft, { amount: 3, enf: 'watch', pun: 'fine', method: 'firing', setting: 'private' }, spec, { name: CC.lawNameIssue(n) ? CC.uniqueLawName(n) : n }); refreshBuilder(); }));
     root.querySelectorAll('[data-const]').forEach((b) => b.addEventListener('click', () => {
       const k = b.dataset.const; const el = root.querySelector('#c-' + k);
-      let v = el.value; if (k === 'tax') v = Number(v); if (k === 'term') v = Number(v); if (k === 'exempt') v = v === 'true';
+      let v = el.value; if (k === 'tax' || k === 'term' || k === 'wage' || k === 'salary') v = Number(v); if (k === 'exempt') v = v === 'true';
       act('amend', { change: { kind: k, value: v } });
     }));
     const ex = root.querySelector('#exportbtn'); if (ex) ex.addEventListener('click', () => { const t = root.querySelector('#savecode'); t.value = CC.serialize(); t.select(); try { navigator.clipboard.writeText(t.value).then(() => toast('Save code copied.'), () => toast('Select the text and copy it.')); } catch (e) { toast('Select the text and copy it.'); } });
@@ -555,37 +663,100 @@
   }
 
   // ───────────────────────── start and end ─────────────────────────
+  // the laws you can choose to found the commune with, at no cost
+  const FOUNDING_LAWS = [
+    ['The Kettle Act', { who: 'everyone', rule: 'subsidise', beh: 'share', amount: 2 }, 'Pay people to share food'],
+    ['Water Discipline', { who: 'everyone', rule: 'ration', beh: 'hoard', enf: 'watch', pun: 'fine' }, 'Extra water only once a day'],
+    ['Quiet Hours Edict', { who: 'everyone', rule: 'ban', beh: 'music', enf: 'watch', pun: 'fine' }, 'No loud music after dark'],
+    ['Busy Hands', { who: 'adults', rule: 'require', beh: 'work', enf: 'watch', pun: 'service' }, 'Every adult works every day'],
+    ['Schooling Act', { who: 'children', rule: 'require', beh: 'study', enf: 'watch', pun: 'warning' }, 'Children must attend lessons'],
+    ['Property Act', { who: 'everyone', rule: 'ban', beh: 'steal', enf: 'watch', pun: 'service' }, 'No theft'],
+    ['Disarmament Rule', { who: 'everyone', rule: 'ban', beh: 'weapon', enf: 'watch', pun: 'confiscate' }, 'No weapons'],
+    ['Decency Code', { who: 'everyone', rule: 'ban', beh: 'naked', enf: 'watch', pun: 'fine' }, 'Clothes on in the yard'],
+    ['Free Body Order', { who: 'adults', rule: 'require', beh: 'naked', enf: 'watch', pun: 'warning' }, 'Adults go naked every day'],
+    ['Love Is Love Act', { who: 'everyone', rule: 'reward', beh: 'samesex' }, 'Honour same-sex partnerships'],
+    ['Natural Family Edict', { who: 'everyone', rule: 'ban', beh: 'samesex', enf: 'watch', pun: 'detention' }, 'Outlaw same-sex relationships'],
+    ['Sacred Bond Act', { who: 'everyone', rule: 'ban', beh: 'divorce', enf: 'watch', pun: 'bigfine' }, 'Outlaw divorce'],
+    ['One Partner Rule', { who: 'everyone', rule: 'ban', beh: 'polygamy', enf: 'watch', pun: 'fine' }, 'One partner each'],
+    ['Open Hearts Charter', { who: 'adults', rule: 'reward', beh: 'polygamy' }, 'Honour taking more than one partner'],
+    ['Stay Put Order', { who: 'everyone', rule: 'ban', beh: 'leave', enf: 'watch', pun: 'detention' }, 'Nobody leaves'],
+    ['Free Speech Charter', { who: 'everyone', rule: 'reward', beh: 'criticise' }, 'Honour criticism of the government'],
+  ];
   function showStart(canCancel) {
     const ov = $('overlay');
     let start = 'found';
-    ov.innerHTML = `<div class="sheet" role="dialog" aria-modal="true" aria-labelledby="st-title">
+    const me = { first: 'Alex', last: 'Rowe', sex: 'm', orient: 'bi', commune: 'The Yard' };
+    const k = { type: 'founder', gate: 'vetted', tax: 0.1, wage: CC.DEFAULT_WAGE, salary: CC.DEFAULT_SALARY, conflict: 'newest', exempt: false, term: 24, currency: 'scrip', laws: [] };
+    const step1 = () => {
+      ov.innerHTML = `<div class="sheet" role="dialog" aria-modal="true" aria-labelledby="st-title">
       <div><p class="small muted mono">GOOSEKNIGHTGAMING · ${CC.VERSION}</p><h2 id="st-title">CONTAINER <span>COMMUNE</span></h2>
       <p class="lead" style="margin-top:8px">A yard of shipping containers has broken away from the country to run itself. Write its laws, live with its people, and keep hold of power, or take it.</p></div>
       <div class="starts">
-        <button type="button" class="start on" data-start="found"><h3>Found a commune</h3><p>You lead about two dozen settlers on day one. No laws, no parties. Rule as you like: kindly, harshly, openly or in secret.</p></button>
-        <button type="button" class="start" data-start="join"><h3>Join an established commune</h3><p>You arrive as a newcomer in a commune of about 35, with an elected council, three parties and laws already in force. Rise, reform, or overthrow it.</p></button>
+        <button type="button" class="start${start === 'found' ? ' on' : ''}" data-start="found"><h3>Found a commune</h3><p>You lead about two dozen settlers on day one. Write the founding constitution for free, then rule as you like: kindly, harshly, openly or in secret.</p></button>
+        <button type="button" class="start${start === 'join' ? ' on' : ''}" data-start="join"><h3>Join an established commune</h3><p>You arrive as a newcomer in a commune of about 35, with an elected council, three parties and laws already in force. Rise, reform, or overthrow it.</p></button>
       </div>
       <div class="formrow">
-        <label class="field"><span>Your first name</span><input class="plain" id="f-first" maxlength="20" value="Alex"></label>
-        <label class="field"><span>Your surname</span><input class="plain" id="f-last" maxlength="20" value="Rowe"></label>
-        <label class="field"><span>Commune name</span><input class="plain" id="f-commune" maxlength="30" value="The Yard"></label>
+        <label class="field"><span>Your first name</span><input class="plain" id="f-first" maxlength="20" value="${escRaw(me.first)}"></label>
+        <label class="field"><span>Your surname</span><input class="plain" id="f-last" maxlength="20" value="${escRaw(me.last)}"></label>
+        <label class="field"><span>You are a</span><select class="plain" id="f-sex">${opt([['m', 'Man'], ['f', 'Woman'], ['x', 'Non-binary person']], me.sex)}</select></label>
+        <label class="field"><span>Drawn to</span><select class="plain" id="f-orient">${opt([['bi', 'Anyone'], ['straight', 'The opposite sex'], ['gay', 'The same sex']], me.orient)}</select></label>
+        <label class="field"><span>Commune name</span><input class="plain" id="f-commune" maxlength="30" value="${escRaw(start === 'found' ? me.commune : 'Steel Haven')}"></label>
       </div>
-      <div class="row"><button type="button" class="btn primary big" id="f-go">Begin</button>${canCancel ? '<button type="button" class="btn" id="f-cancel">Back to my game</button>' : ''}</div>
-      <p class="small muted">Each day you get three actions. Click people to act on them; write laws in the Laws tab; then end the day and read what happened. The game saves itself in this browser.</p>
+      <div class="row"><button type="button" class="btn primary big" id="f-go">${start === 'found' ? 'Next: the constitution' : 'Begin'}</button>${canCancel ? '<button type="button" class="btn" id="f-cancel">Back to my game</button>' : ''}</div>
+      <p class="small muted">Each day you get three actions (you can buy more). Click people to act on them; write laws in the Laws tab; then end the day and read what happened. The game saves itself in this browser.</p>
     </div>`;
-    ov.hidden = false;
-    ov.querySelectorAll('[data-start]').forEach((b) => b.addEventListener('click', () => {
-      start = b.dataset.start;
-      ov.querySelectorAll('[data-start]').forEach((x) => x.classList.toggle('on', x === b));
-      ov.querySelector('#f-commune').value = start === 'found' ? 'The Yard' : 'Steel Haven';
-    }));
-    ov.querySelector('#f-go').addEventListener('click', () => {
-      S = CC.newGame({ start, first: ov.querySelector('#f-first').value.trim() || 'Alex', last: ov.querySelector('#f-last').value.trim() || 'Rowe', communeName: ov.querySelector('#f-commune').value.trim(), seed: (Date.now() & 0x7fffffff) || 7 });
+      const read = () => { me.first = ov.querySelector('#f-first').value.trim() || 'Alex'; me.last = ov.querySelector('#f-last').value.trim() || 'Rowe'; me.sex = ov.querySelector('#f-sex').value; me.orient = ov.querySelector('#f-orient').value; me.commune = ov.querySelector('#f-commune').value.trim(); };
+      ov.querySelectorAll('[data-start]').forEach((b) => b.addEventListener('click', () => { read(); start = b.dataset.start; if (start === 'found' && me.commune === 'Steel Haven') me.commune = 'The Yard'; step1(); }));
+      ov.querySelector('#f-go').addEventListener('click', () => { read(); if (start === 'found') step2(); else begin(); });
+      const cancel = ov.querySelector('#f-cancel'); if (cancel) cancel.addEventListener('click', () => { ov.hidden = true; });
+      setTimeout(() => ov.querySelector('#f-go').focus(), 50);
+    };
+    const step2 = () => {
+      const row = (id, label, pairs, val, hint) => `<label class="field"><span>${label}</span><select class="plain" id="k-${id}">${opt(pairs, String(val))}</select>${hint ? `<small class="muted">${hint}</small>` : ''}</label>`;
+      ov.innerHTML = `<div class="sheet" role="dialog" aria-modal="true" aria-labelledby="k-title">
+      <div><p class="small muted mono">${escRaw(me.commune || 'The Yard').toUpperCase()} · DAY ONE</p><h2 id="k-title">THE FOUNDING <span>CONSTITUTION</span></h2>
+      <p class="lead" style="margin-top:8px">Set it up however you like. It costs nothing today. After today, changing any of it costs actions, and votes if you choose a democracy.</p></div>
+      <div class="formrow">
+        ${row('type', 'Government', Object.entries(CC.GOV).map(([key, g]) => [key, g.label]), k.type, 'Founder’s rule and dictatorship: you decree. Council and assembly: laws go to a vote and you face elections.')}
+        ${row('gate', 'Newcomers', Object.entries(CC.GATE), k.gate)}
+        ${row('conflict', 'When laws contradict', Object.entries(CC.CONFLICT), k.conflict)}
+        ${row('exempt', 'The leader and the law', [['false', 'The leader is bound by the law'], ['true', 'The leader is above the law']], k.exempt)}
+        ${row('tax', 'Work tax', [0, 0.05, 0.1, 0.15, 0.2, 0.3, 0.5].map((v) => [String(v), `${R0(v * 100)}%`]), k.tax)}
+        ${row('wage', 'Wage per shift', WAGES.map((v) => [String(v), v ? `${v} a shift` : 'Unpaid']), k.wage, `A shift earns the commune ${CC.SHIFT_VALUE}. Pay more and the treasury drains; less and it fills.`)}
+        ${row('salary', "The leader's salary", SALARIES.map((v) => [String(v), v ? `${v} a day` : 'None']), k.salary)}
+        ${row('term', 'Elections every', [12, 24, 48].map((v) => [String(v), `${v} days`]), k.term, 'Only matters in a democracy.')}
+        <label class="field"><span>Name of the currency</span><input class="plain" id="k-currency" maxlength="20" value="${escRaw(k.currency)}"><small class="muted">Scrip, caps, bolts, crowns: whatever you like.</small></label>
+      </div>
+      <div><div class="sect">Founding laws <span class="r small">optional, free, up to 8</span></div>
+      <div class="founding">${FOUNDING_LAWS.map(([n, spec, blurb], i) => `<label class="flaw"><input type="checkbox" data-flaw="${i}"${k.laws.includes(i) ? ' checked' : ''}><span><b>${escRaw(n)}</b><small>${escRaw(blurb)}</small></span></label>`).join('')}</div>
+      <p class="small muted" style="margin-top:6px">You can write any other law, with any punishment, from the Laws tab once the commune is running.</p></div>
+      <div class="row"><button type="button" class="btn primary big" id="k-go">Found ${escRaw(me.commune || 'The Yard')}</button><button type="button" class="btn" id="k-back">Back</button></div>
+    </div>`;
+      const read = () => {
+        const g = (id) => ov.querySelector('#k-' + id).value;
+        k.type = g('type'); k.gate = g('gate'); k.conflict = g('conflict'); k.exempt = g('exempt') === 'true';
+        k.tax = Number(g('tax')); k.wage = Number(g('wage')); k.salary = Number(g('salary')); k.term = Number(g('term'));
+        k.currency = ov.querySelector('#k-currency').value.trim() || 'scrip';
+        k.laws = [...ov.querySelectorAll('[data-flaw]:checked')].map((x) => Number(x.dataset.flaw));
+      };
+      ov.querySelectorAll('[data-flaw]').forEach((x) => x.addEventListener('change', () => { if (ov.querySelectorAll('[data-flaw]:checked').length > 8) { x.checked = false; toast('Eight founding laws at most. Write the rest later.', true); } }));
+      ov.querySelector('#k-back').addEventListener('click', () => { read(); step1(); });
+      ov.querySelector('#k-go').addEventListener('click', () => { read(); begin(); });
+      ov.scrollTop = 0;
+    };
+    const begin = () => {
+      const o = { start, first: me.first, last: me.last, sex: me.sex, orient: me.orient, communeName: me.commune, seed: (Date.now() & 0x7fffffff) || 7 };
+      if (start === 'found') {
+        o.constitution = { type: k.type, gate: k.gate, conflict: k.conflict, exempt: k.exempt, tax: k.tax, wage: k.wage, salary: k.salary, term: k.term };
+        o.currency = k.currency;
+        o.laws = k.laws.map((i) => ({ ...FOUNDING_LAWS[i][1], name: FOUNDING_LAWS[i][0], enf: FOUNDING_LAWS[i][1].enf || 'watch', pun: FOUNDING_LAWS[i][1].pun || 'fine', amount: FOUNDING_LAWS[i][1].amount || 3, method: 'firing', setting: 'private' }));
+      }
+      S = CC.newGame(o);
       tab = 'today'; selected = CC.PLAYER; peopleFilter = 'all';
       ov.hidden = true; save(); render();
-    });
-    const cancel = ov.querySelector('#f-cancel'); if (cancel) cancel.addEventListener('click', () => { ov.hidden = true; });
-    setTimeout(() => ov.querySelector('#f-go').focus(), 50);
+    };
+    ov.hidden = false;
+    step1();
   }
   function showEnd() {
     const e = CC.epilogue();
@@ -614,6 +785,13 @@
     window.scrollTo({ top: 0 });
   });
   window.addEventListener('resize', () => { if (S) renderDrawer(); });
+  setInterval(() => {
+    const el = document.getElementById('ycensus');
+    if (!el || !window.CCYard) return;
+    const c = window.CCYard.census();
+    if (!c) return;
+    el.textContent = 'Right now: ' + Object.entries(c).sort((a, b) => b[1] - a[1]).map(([k, n]) => `${n} ${k}`).join(' · ');
+  }, 1000);
   window.ContainerCommune = { get state() { return S; }, render };
   if (loadSaved()) { render(); if (S.over) showEnd(); }
   else { S = CC.newGame({ start: 'found', seed: 2026, first: 'Alex', last: 'Rowe', communeName: 'The Yard' }); render(); showStart(false); }

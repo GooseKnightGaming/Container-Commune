@@ -36,7 +36,18 @@
   function blame(c, d) { c.govt = clamp(c.govt + d, -100, 100); if (leaderIsPlayer()) c.opinion = clamp(c.opinion + d, -100, 100); }
   function log(text, kind) { S.chronicle.push({ day: S.day, text, kind: kind || 'event' }); if (S.chronicle.length > 400) S.chronicle.shift(); }
   CC.isOfficial = (c) => c.trade === 'warden' || S.gov.council.includes(c.id) || S.gov.leader === c.id;
-  CC._internals = { clamp, rnd, chance, pick, shuffle, P, alive, here, free, npcFree, adultsHere, has, player, leaderIsPlayer, regimeOp, nm, Nm, was, list, blame, log };
+  // partners: one main partner plus any extra partners (polygamy)
+  const partnersOf = (c) => [c.partner, ...(c.extra || [])].filter((x) => x != null);
+  const livePartners = (c) => partnersOf(c).map(P).filter((x) => x && alive(x));
+  const sameSex = (a, b) => a.sex === b.sex && a.sex !== 'x';
+  function attracted(a, b) {
+    if (a.orient === 'bi') return true;
+    if (a.orient === 'gay') return sameSex(a, b);
+    return a.sex !== b.sex && a.sex !== 'x' && b.sex !== 'x';
+  }
+  const money = (n) => Math.round(n * 10) / 10;
+  CC.partnersOf = partnersOf; CC.attracted = attracted; CC.sameSex = sameSex;
+  CC._internals = { clamp, rnd, chance, pick, shuffle, P, alive, here, free, npcFree, adultsHere, has, player, leaderIsPlayer, regimeOp, nm, Nm, was, list, blame, log, partnersOf, livePartners, sameSex, attracted, money };
 
   // ───────────────────────── people ─────────────────────────
   const TRADE_W = { gardener: 4, cook: 2, mechanic: 2, labourer: 3, medic: 1.2, teacher: 1, warden: 1.6, organiser: 1, artist: 1, trader: 1 };
@@ -58,16 +69,22 @@
     }
     return out;
   }
-  function pickFirst() {
+  function pickFirst(sex) {
     const used = new Set(S.people.filter(alive).map((c) => c.first));
-    const pool = CC.FIRST.filter((n) => !used.has(n));
-    return pool.length ? pick(pool) : pick(CC.FIRST);
+    const src = sex === 'm' ? CC.FIRST_M : sex === 'f' ? CC.FIRST_F : sex === 'x' ? CC.FIRST_X : CC.FIRST;
+    const pool = src.filter((n) => !used.has(n));
+    return pool.length ? pick(pool) : pick(src);
   }
+  function randSex() { const r = rnd(); return r < 0.48 ? 'm' : r < 0.96 ? 'f' : 'x'; }
+  function randOrient(sex) { if (sex === 'x') return 'bi'; const r = rnd(); return r < 0.82 ? 'straight' : r < 0.9 ? 'gay' : 'bi'; }
+  // an orientation that fits a couple we are creating directly
+  function fitOrient(a, b) { if (a.sex === 'x' || b.sex === 'x') return 'bi'; if (sameSex(a, b)) return chance(0.7) ? 'gay' : 'bi'; return chance(0.88) ? 'straight' : 'bi'; }
   function makePerson(o) {
     o = o || {};
     const age = o.age != null ? o.age : 20 + rnd() * 40;
+    const sex = o.sex || randSex();
     const c = {
-      id: S.people.length, first: o.first || pickFirst(), last: o.last || pick(CC.LAST), age,
+      id: S.people.length, first: o.first || pickFirst(sex), last: o.last || pick(CC.LAST), age, sex, orient: o.orient || randOrient(sex), extra: [], wage: 0,
       trade: o.trade || (age < 16 ? 'child' : randTrade()), traits: o.traits || randTraits(2),
       motive: o.motive || pick(['self', 'self', 'others', 'believed']),
       accuracy: o.accuracy != null ? o.accuracy : Math.round(20 + rnd() * 70),
@@ -89,9 +106,21 @@
     if (!a.friends.includes(b.id)) a.friends.push(b.id);
     if (!b.friends.includes(a.id)) b.friends.push(a.id);
   }
-  function pair(a, b) { a.partner = b.id; b.partner = a.id; befriend(a, b); a.life.partner = (a.life.partner || 0) + 1; b.life.partner = (b.life.partner || 0) + 1; }
+  function pair(a, b, extra) {
+    if (extra) { a.extra.push(b.id); b.extra.push(a.id); a.life.polygamy = (a.life.polygamy || 0) + 1; }
+    else { a.partner = b.id; b.partner = a.id; }
+    befriend(a, b); a.life.partner = (a.life.partner || 0) + 1; b.life.partner = (b.life.partner || 0) + 1;
+    if (sameSex(a, b)) { a.life.samesex = (a.life.samesex || 0) + 1; b.life.samesex = (b.life.samesex || 0) + 1; }
+  }
+  // end a partnership (a divorce if either wanted it)
+  function unpair(a, b) {
+    if (a.partner === b.id) a.partner = null; if (b.partner === a.id) b.partner = null;
+    a.extra = a.extra.filter((x) => x !== b.id); b.extra = b.extra.filter((x) => x !== a.id);
+    // an extra partner steps up to be the main one
+    for (const x of [a, b]) if (x.partner == null && x.extra.length) { x.partner = x.extra.shift(); }
+  }
   function addChild(a, b, o) {
-    const kid = makePerson(Object.assign({ last: pick([a.last, b ? b.last : a.last]), parents: b ? [a.id, b.id] : [a.id], trade: 'child' }, o));
+    const kid = makePerson(Object.assign({ last: pick([a.last, b ? b.last : a.last]), parents: b ? [a.id, b.id] : [a.id], trade: 'child', sex: chance(0.03) ? 'x' : chance(0.5) ? 'm' : 'f' }, o));
     const inherited = [...a.traits, ...(b ? b.traits : [])];
     kid.traits = [inherited.length ? pick(inherited) : null, ...randTraits(3)].filter((t, i, arr) => t && arr.indexOf(t) === i)
       .filter((t, i, arr) => !CLASH.some(([x, y]) => (t === x && arr.slice(0, i).includes(y)) || (t === y && arr.slice(0, i).includes(x)))).slice(0, 2);
@@ -102,7 +131,7 @@
     kid.govt = Math.round((a.govt + (b ? b.govt : a.govt)) / 2);
     return kid;
   }
-  CC._people = { makePerson, befriend, pair, addChild, randTraits };
+  CC._people = { makePerson, befriend, pair, unpair, addChild, randTraits, fitOrient, pickFirst, randSex, randOrient };
 
   // ───────────────────────── the commune's numbers ─────────────────────────
   const capacityHomes = () => (S.buildings.home || 0) * 2;
@@ -154,7 +183,8 @@
   function eligible(c, b) {
     const B = BEH[b];
     if (c.age < B.minAge || c.age > B.maxAge) return false;
-    if (b === 'partner') return c.age >= 18;
+    if (b === 'partner' || b === 'samesex' || b === 'polygamy') return c.age >= 18;
+    if (b === 'divorce') return partnersOf(c).length > 0 || (c.life.divorce || 0) > 0;
     if (b === 'child') return c.partner != null || c.children.length > 0;
     return true;
   }
@@ -217,11 +247,13 @@
       case 'ration':
         if (L.beh === 'child') return 'may have only one child';
         if (L.beh === 'partner') return 'may form only one partnership in their life';
+        if (L.beh === 'polygamy') return 'may take only one extra partner';
+        if (L.beh === 'divorce') return 'may divorce only once in their life';
         return `may ${B.label} only once a day`;
-      case 'license': return `need a ${CC.LICENSE_FEE}-scrip permit to ${B.label}`;
-      case 'tax': return `pay ${L.amount} scrip in tax each time they ${B.label}`;
-      case 'subsidise': return `are paid ${L.amount} scrip each time they ${B.label}`;
-      case 'reward': return `are publicly honoured when they ${B.label}`;
+      case 'license': return `need a ${CC.LICENSE_FEE}-scrip permit to ${B.act || B.label}`;
+      case 'tax': return `pay ${L.amount} scrip in tax each time they ${B.act || B.label}`;
+      case 'subsidise': return `are paid ${L.amount} scrip each time they ${B.act || B.label}`;
+      case 'reward': return `are publicly honoured when they ${B.act || B.label}`;
     }
     return '';
   }
@@ -236,7 +268,7 @@
   }
   function rulesFor(b) {
     const B = BEH[b];
-    return Object.keys(RULES).filter((r) => !(B.kind === 'life' && (r === 'tax' || r === 'subsidise' || r === 'reward') && b === 'leave') && !(b === 'leave' && r === 'ration'));
+    return Object.keys(RULES).filter((r) => !(B.kind === 'life' && (r === 'tax' || r === 'subsidise' || r === 'reward') && b === 'leave') && !((b === 'leave' || b === 'samesex') && r === 'ration'));
   }
 
   // ───────────────────────── wants and views ─────────────────────────
@@ -248,7 +280,13 @@
     for (const t of c.traits) u += TRAITS[t].likes[b] || 0;
     u += MOTIVE[c.motive].likes[b] || 0;
     switch (b) {
-      case 'work': if (c.scrip < 10) u += 10; if (c.retired) u -= 16; break;
+      case 'work': {
+        if (c.scrip < 10) u += 10; if (c.retired) u -= 16; u += (S.gov.wage - CC.DEFAULT_WAGE) * 3; if (c.unpaid) u -= 8;
+        const short = S.food < here().length * 2.5;
+        if (short) u += c.trade === 'gardener' || c.trade === 'cook' ? 20 : 8;
+        break;
+      }
+      case 'naked': if (Math.floor((S.day % YEAR) / (YEAR / 4)) === 3) u -= 14; if (c.age < 18) u -= 10; break;
       case 'study': if (c.age >= 16) u -= 12; if (S.buildings.school) u += 6; break;
       case 'trade': if (c.scrip < 10) u += 8; break;
       case 'criticise': u += Math.max(0, -regimeOp(c)) * 0.4 + (c.plot != null ? 20 : 0); break;
@@ -269,6 +307,13 @@
   }
   function lifeLike(c, b) {
     let u = 0;
+    if (b === 'samesex') { u = c.orient === 'gay' ? 40 : c.orient === 'bi' ? 12 : -30; if (has(c, 'Romantic') && c.orient !== 'straight') u += 8; }
+    if (b === 'polygamy') { u = -18 + (has(c, 'Romantic') ? 22 : 0) + (c.motive === 'self' ? 6 : 0) + (has(c, 'Rebellious') ? 6 : 0) - (has(c, 'Family-minded') ? 10 : 0); }
+    if (b === 'divorce') {
+      u = -12;
+      for (const p of livePartners(c)) u = Math.max(u, -12 + ((c.grudges[p.id] || 0) + (p.grudges[c.id] || 0)) * 0.6 + (c.needs.belonging < 25 ? 10 : 0));
+      if (has(c, 'Devout')) u -= 10;
+    }
     if (b === 'partner') { u = 30; if (has(c, 'Romantic')) u += 15; if (has(c, 'Family-minded')) u += 10; }
     if (b === 'child') { u = 22; if (has(c, 'Family-minded')) u += 25; if (c.children.length >= 2) u -= 15; if (crowding() > 1.2) u -= 10; }
     if (b === 'leave') u = leaveWant(c);
@@ -291,7 +336,9 @@
     if (S._avgDay !== S.day || !S._avg) { S._avg = {}; S._avgDay = S.day; }
     if (S._avg[b] === undefined) {
       const xs = here().filter((c) => !c.isPlayer && eligible(c, b));
-      S._avg[b] = xs.length ? xs.reduce((n, x) => n + likeOf(x, b), 0) / xs.length : 0;
+      // for who-you-love behaviours, what matters is how much the people who want it want it
+      const f = IDENTITY.includes(b) ? (x) => Math.max(0, likeOf(x, b)) : (x) => likeOf(x, b);
+      S._avg[b] = xs.length ? xs.reduce((n, x) => n + f(x), 0) / xs.length : 0;
     }
     return S._avg[b];
   }
@@ -301,12 +348,14 @@
     if (c.motive === 'believed') { const own = clamp(likeOf(c, b) / 40, -1, 1.5); return (truth * c.accuracy + (own + c.bias[b]) * (100 - c.accuracy)) / 100; }
     return 0;
   }
-  const POLICY_BEH = DAY_BEH.concat(['partner', 'child']);
+  const IDENTITY = ['samesex', 'polygamy', 'divorce'];
+  const POLICY_BEH = DAY_BEH.concat(['partner', 'samesex', 'polygamy', 'divorce', 'child']);
   function desires(c) {
     if (c._dd === S.day && c._des) return c._des;
     const d = {};
     for (const b of POLICY_BEH) {
-      const own = clamp(likeOf(c, b) / 40, -1, 1.2);
+      let own = clamp(likeOf(c, b) / 40, -1, 1.2);
+      if (IDENTITY.includes(b)) own = Math.max(0, own);
       d[b] = clamp(own * (c.motive === 'self' ? 0.9 : 0.4) + valueOf(c, b) * 0.7 + othersView(c, b) * 0.4, -1, 1);
     }
     c._des = d; c._dd = S.day;
@@ -322,7 +371,10 @@
   // how much citizen c supports law L (-100 .. 100)
   function supportFor(c, L) {
     const R = RULES[L.rule], b = L.beh, B = BEH[b];
-    const own = B.kind === 'day' ? clamp(likeOf(c, b) / 40, -1, 1.5) : clamp(lifeLike(c, b) / 40, -1, 1.5);
+    let own = B.kind === 'day' ? clamp(likeOf(c, b) / 40, -1, 1.5) : clamp(lifeLike(c, b) / 40, -1, 1.5);
+    // not wanting to do something yourself is no reason to ban it for others who do
+    // and not wanting it yourself is no reason to object when others are honoured for it, unless you'd be made to
+    if ((b === 'samesex' || b === 'polygamy' || b === 'divorce') && L.rule !== 'require') own = Math.max(0, own);
     const others = othersView(c, b);
     const V = valueOf(c, b);
     const selfW = c.motive === 'self' ? 1.5 : 0.6;
@@ -393,17 +445,34 @@
     if ((MOTIVE[c.motive].likes[b] || 0) >= 10) out.push(c.motive === 'others' ? 'acts for others' : c.motive === 'self' ? 'looks after number one' : 'thinks it helps others');
     if ((b === 'criticise' || b === 'protest') && regimeOp(c) < -20) out.push('angry with the government');
     if (b === 'work' && c.scrip < 10) out.push('short of scrip');
+    if (b === 'work' && S.gov.wage > CC.DEFAULT_WAGE) out.push('good wages');
+    if (b === 'work' && S.food < here().length * 2.5) out.push('food is running short');
     if (b === 'organise' && c.party != null) out.push('party member');
     if (b === 'address' && regimeOp(c) > 20) out.push('supports the government');
     return out;
   }
 
   // ───────────────────────── laws: passing and repealing ─────────────────────────
+  const normName = (n) => String(n || '').trim().replace(/\s+/g, ' ').toLowerCase();
+  function lawNameIssue(name) {
+    const n = normName(name);
+    if (!n) return 'Give the law a name.';
+    const dup = S.laws.find((L) => normName(L.name) === n);
+    if (dup) return `There is already a law called “${dup.name}”. Give this one a different name.`;
+    return null;
+  }
+  function uniqueLawName(base) {
+    let name = base, i = 2;
+    const roman = ['', '', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X'];
+    while (lawNameIssue(name)) name = `${base} ${roman[i] || i}`, i++;
+    return name;
+  }
+  CC.lawNameIssue = lawNameIssue; CC.uniqueLawName = uniqueLawName;
   function buildLaw(spec) {
     return {
       id: S.nextLawId, name: (spec.name || '').trim() || 'Unnamed Act', who: spec.who || 'everyone', rule: spec.rule || 'ban', beh: spec.beh || 'music',
       enf: spec.enf || 'wardens', pun: spec.pun || 'fine', amount: spec.amount || 3, method: spec.method || 'firing', setting: spec.setting || 'private',
-      from: S.day + 1, passedDay: S.day, by: spec.by != null ? spec.by : S.gov.leader, brokenToday: 0, caughtToday: 0, brokenTotal: 0,
+      from: S.day + 1, passedDay: S.day, by: spec.by != null ? spec.by : S.gov.leader, proposedBy: spec.proposedBy != null ? spec.proposedBy : null, brokenToday: 0, caughtToday: 0, brokenTotal: 0,
     };
   }
   function enact(L, R) {
@@ -432,10 +501,40 @@
       delete c.lawSupport[L.id];
       c.licenses = c.licenses.filter((x) => x !== L.id);
     }
+    S.repealed = S.repealed || [];
+    S.repealed.push({ ...L, repealedDay: S.day, repealedBy: by != null ? by : null, text: describeLaw(L) });
+    if (S.repealed.length > 40) S.repealed.shift();
     log(`“${L.name}” was repealed.`, 'law');
     if (R) R.politics.push(`“${L.name}” was repealed.`);
   }
   CC._laws = { buildLaw, enact, repeal };
+
+  // ───────────────────────── money laws: taxes, subsidies and honours on a behaviour ─────────────────────────
+  // Applies to everyone, you included. Returns a short note of what changed hands.
+  function lawMoney(c, b) {
+    const notes = [];
+    for (const L of S.laws) {
+      if (L.beh !== b || !governs(L, c)) continue;
+      if (L.rule === 'tax') { const pay = Math.min(c.scrip, L.amount); c.scrip -= pay; S.treasury += pay; if (pay) notes.push(`paid ${money(pay)} scrip tax under “${L.name}”`); }
+      if (L.rule === 'subsidise') {
+        if (S.treasury >= L.amount) { c.scrip += L.amount; S.treasury -= L.amount; notes.push(`got ${L.amount} scrip under “${L.name}”`); }
+        else { if (!c.isPlayer) c.govt -= 1; S._unpaid = (S._unpaid || 0) + 1; notes.push(`should have been paid under “${L.name}”, but the treasury is short`); }
+      }
+      if (L.rule === 'reward') { if (!c.isPlayer) { c.govt += 1; c.needs.belonging += 5; } notes.push(`honoured under “${L.name}”`); }
+    }
+    return notes;
+  }
+  // a shift of work: the commune earns from it and pays the wage
+  function payShift(c) {
+    S.treasury += CC.SHIFT_VALUE;
+    const net = money(S.gov.wage * (1 - S.gov.tax));
+    if (net <= 0) { c.wage = 0; return { paid: 0, ok: true }; }
+    if (S.treasury >= net) { S.treasury -= net; c.scrip += net; c.wage = (c.wage || 0) + net; c.unpaid = false; S._wages = (S._wages || 0) + net; return { paid: net, ok: true }; }
+    c.unpaid = true; S._unpaidShifts = (S._unpaidShifts || 0) + 1;
+    if (!c.isPlayer) { c.govt = clamp(c.govt - 2, -100, 100); if (leaderIsPlayer()) c.opinion = clamp(c.opinion - 2, -100, 100); }
+    return { paid: 0, ok: false };
+  }
+  CC.lawMoney = lawMoney; CC.payShift = payShift;
 
   // ───────────────────────── the day ─────────────────────────
   function choose(c) {
@@ -471,7 +570,8 @@
     const prod = { food: 0, water: 0, mat: 0, treasury: 0, heal: 0, teach: 0, cook: 0, gardenUsed: 0 };
     S._prod = prod;
     const people = npcFree();
-    for (const c of S.people) { c.today = []; c.why = []; c._boughtLicense = null; c._trap = null; c.armed = false; }
+    for (const c of S.people) { c.today = []; c.why = []; c._boughtLicense = null; c._trap = null; c.armed = false; if (!c.isPlayer) c.wage = 0; }
+    S._wages = 0; S._unpaidShifts = 0;
     for (const c of people) {
       const { done, reasons } = choose(c);
       c.today = done; c.why = reasons;
@@ -481,23 +581,17 @@
     if (me.status === 'free') { me.today = S.pdid.slice(); me.why = S.pdid.map((b) => [b, ['your choice']]); }
 
     const gardenSlots = (S.buildings.garden || 0) * 3;
-    const gatherers = [], drinkers = [], reporters = [], misShare = [], goodShare = [], protesters = [], talkers = [];
+    const gatherers = [], drinkers = [], reporters = [], misShare = [], goodShare = [], protesters = [], talkers = [], naked = [];
     let shifts = 0;
     for (const c of people) {
       for (const b of c.today) {
         const N = c.needs;
-        for (const L of S.laws) {
-          if (L.beh !== b || !governs(L, c)) continue;
-          if (L.rule === 'tax') { const pay = Math.min(c.scrip, L.amount); c.scrip -= pay; S.treasury += pay; }
-          if (L.rule === 'subsidise') { if (S.treasury >= L.amount) { c.scrip += L.amount; S.treasury -= L.amount; } else { c.govt -= 1; S._unpaid = (S._unpaid || 0) + 1; } }
-          if (L.rule === 'reward') { c.govt += 1; N.belonging += 5; }
-        }
+        lawMoney(c, b);
         switch (b) {
           case 'work': {
             shifts++; N.purpose += 30;
             const half = c.retired ? 0.5 : 1;
-            const gross = 3, tax = gross * S.gov.tax;
-            c.scrip += gross - tax; S.treasury += tax;
+            payShift(c);
             switch (c.trade) {
               case 'gardener': prod.food += (prod.gardenUsed < gardenSlots ? 8 : 2) * half; prod.gardenUsed++; break;
               case 'cook': if (S.buildings.canteen) prod.cook += 0.05; else prod.food += 1; break;
@@ -560,6 +654,15 @@
           case 'address': N.belonging += 5; c.govt = clamp(c.govt + (has(c, 'Cynic') ? -3 : 3), -100, 100); if (leaderIsPlayer()) c.opinion = clamp(c.opinion + (has(c, 'Cynic') ? -3 : 3), -100, 100); break;
           case 'volunteer': N.purpose += 20; N.belonging += 10; prod.heal += 4; break;
           case 'outside': N.freedom += 15; talkers.push(c); S.attention = clamp(S.attention + 0.6 + (wellbeing() < 45 ? 0.6 : 0), 0, 100); break;
+          case 'naked': {
+            N.freedom += 20; naked.push(c);
+            if (Math.floor((S.day % YEAR) / (YEAR / 4)) === 3) c.health -= 3;
+            for (const x of shuffle(people.filter((y) => y !== c)).slice(0, 4)) {
+              if (has(x, 'Devout') || has(x, 'Timid')) { x.needs.belonging -= 3; x.grudges[c.id] = (x.grudges[c.id] || 0) + 4; }
+              else if (has(x, 'Rebellious') || has(x, 'Romantic')) x.needs.freedom += 2;
+            }
+            break;
+          }
         }
       }
     }
@@ -581,6 +684,10 @@
     }
     if (misShare.length) R.life.push(`${list(misShare.map((c) => c.first))} gave away ${misShare.length > 1 ? 'their dinners' : 'their dinner'} to people who weren't hungry, and went to bed hungry.`);
     if (goodShare.length) R.life.push(`${list(goodShare.map((c) => c.first))} shared food with people who needed it.`);
+    if (naked.length) {
+      const req = S.laws.some((L) => L.beh === 'naked' && L.rule === 'require' && active(L));
+      R.life.push(req ? `${naked.length} ${naked.length === 1 ? 'person' : 'people'} went about naked, as the law requires.` : naked.length >= 3 ? `${naked.length} people went about the yard naked. Not everyone approved.` : `${list(naked.map((c) => c.first))} went about the yard naked.`);
+    }
     S._reporters = reporters; S._protesters = protesters; S._talkers = talkers;
     R.stats = { shifts };
   }
@@ -793,6 +900,14 @@
     for (const [k, on] of Object.entries(S.inst)) if (on) upkeep += CC.INSTITUTIONS[k].upkeep;
     S.treasury -= Math.round(upkeep * 10) / 10;
     S._upkeep = upkeep;
+    // wages (paid shift by shift during the day) and the leader's salary
+    const lead = P(S.gov.leader);
+    S._salaryPaid = 0;
+    if (lead && alive(lead) && S.gov.salary > 0) {
+      if (S.treasury >= S.gov.salary) { S.treasury -= S.gov.salary; lead.scrip += S.gov.salary; S._salaryPaid = S.gov.salary; if (lead.isPlayer) R.politics.push(`You drew your salary of ${S.gov.salary} scrip.`); }
+      else if (lead.isPlayer) R.politics.push("The treasury couldn't pay your salary today.");
+    }
+    if (S._unpaidShifts) R.headlines.push(`The treasury couldn't pay wages for ${S._unpaidShifts} shift${S._unpaidShifts === 1 ? '' : 's'} today. The workers noticed.`);
     if (S.treasury < 0) {
       R.headlines.push(`The treasury is empty (${Math.round(S.treasury)} scrip). Enforcement is working at half strength.`);
       for (const c of free()) if (c.trade === 'warden' && !c.isPlayer && chance(0.04)) { c.trade = 'labourer'; R.politics.push(`${c.first} quit as a warden: nobody is paying them.`); }
@@ -833,13 +948,13 @@
     S.materials = Math.max(0, S.materials);
     S._heal = prod.heal;
     R.stats.food = Math.round(prod.food + 2); R.stats.water = Math.round(rain + prod.water); R.stats.mat = Math.round(prod.mat); R.stats.upkeep = Math.round(upkeep);
+    R.stats.wages = Math.round(S._wages || 0); R.stats.unpaid = S._unpaidShifts || 0; R.stats.salary = S._salaryPaid;
   }
 
   // ───────────────────────── life: health, love, births, ageing, comings and goings ─────────────────────────
   function widow(c, R) {
-    const p = P(c.partner);
-    if (p && p.partner === c.id) { p.partner = null; p.needs.belonging -= 40; p.family_loss = true; }
-    c.partner = null;
+    for (const p of partnersOf(c).map(P)) { if (!p) continue; unpair(c, p); p.needs.belonging -= 40; p.family_loss = true; }
+    c.partner = null; c.extra = [];
     for (const k of c.children.map(P)) if (k && alive(k)) k.family_loss = true;
   }
   function departFamily(c, R) {
@@ -865,6 +980,8 @@
       if (c.health < 70) sick.push(c);
       c.health = clamp(c.health, -10, 100);
     }
+    const me0 = player();
+    if (alive(me0)) me0.health = clamp(me0.health + (S.owned && S.owned.villa ? 4 : 1.5) - (me0.status === 'detained' ? 2 : 0), -10, 100);
     sick.sort((a, b) => a.health - b.health);
     for (const c of sick) { if (heal <= 0) break; const h = Math.min(heal, 20); c.health += h; heal -= h; if (c.health > 60) c.ill = false; }
     // deaths
@@ -884,49 +1001,114 @@
         if (how === 'of hunger and thirst') for (const x of here()) blame(x, -6);
       }
     }
-    // partnerships
-    const singles = shuffle(npcFree().filter((c) => c.age >= 18 && c.partner == null));
+    // partnerships: who is drawn to whom, and what the law says about it
+    const lifeLaws = (x, b) => S.laws.filter((L) => L.beh === b && active(L) && governs(L, x));
+    const kin = (c, d) => c.parents.includes(d.id) || d.parents.includes(c.id) || (c.parents.length && c.parents.some((q) => d.parents.includes(q)));
+    const compelled = (c, d) => sameSex(c, d) && [c, d].every((x) => lifeLaws(x, 'samesex').some((L) => L.rule === 'require'));
+    const DOING = { partner: 'forming a partnership', samesex: 'a same-sex partnership', polygamy: 'taking another partner', divorce: 'divorcing' };
+    function pairLaw(c, d, extra) {
+      const kinds = ['partner'];
+      if (sameSex(c, d)) kinds.push('samesex');
+      if (extra) kinds.push('polygamy');
+      let deter = 0; const hits = [];
+      for (const b of kinds) for (const x of [c, d]) for (const L of lifeLaws(x, b)) {
+        const n = x.life[b] || 0;
+        if (L.rule === 'license' && !x.licenses.includes(L.id) && x.scrip >= CC.LICENSE_FEE) { x.licenses.push(L.id); x.scrip -= CC.LICENSE_FEE; S.treasury += CC.LICENSE_FEE; continue; }
+        const broke = L.rule === 'ban' || (L.rule === 'ration' && n >= 1) || (L.rule === 'license' && !x.licenses.includes(L.id));
+        if (broke) { deter += deterrent(x, L); hits.push({ c: x, L, b }); }
+        if (L.rule === 'tax') deter += L.amount * 2;
+        if (L.rule === 'subsidise') deter -= L.amount * 2;
+        if (L.rule === 'reward') deter -= 10;
+        if (L.rule === 'require' && b !== 'partner') deter -= deterrent(x, L) * 0.6;
+      }
+      if (!sameSex(c, d)) for (const x of [c, d]) for (const L of lifeLaws(x, 'samesex')) if (L.rule === 'require') deter += deterrent(x, L) * 0.5;
+      return { deter, hits, kinds };
+    }
+    function sealPair(c, d, extra, pl) {
+      pair(c, d, extra);
+      for (const b of pl.kinds) { lawMoney(c, b); lawMoney(d, b); }
+      if (compelled(c, d) && !(attracted(c, d) && attracted(d, c))) { c.grudges[d.id] = (c.grudges[d.id] || 0) + 12; d.grudges[c.id] = (d.grudges[c.id] || 0) + 12; }
+      const how = extra ? `${c.first} has taken ${d.first} as another partner` : `${c.first} and ${d.first} have become partners`;
+      R.life.push(`${how}${pl.hits.length ? ', against the law' : ''}.`);
+      log(extra ? `${c.first} ${c.last} took ${d.first} ${d.last} as another partner.` : `${c.first} ${c.last} and ${d.first} ${d.last} became partners.`, 'life');
+      const done = new Set();
+      for (const v of pl.hits) { if (done.has(v.c.id)) continue; done.add(v.c.id); punishLife(v.c, v.L, R, DOING[v.b]); }
+    }
+    const singles = shuffle(npcFree().filter((c) => c.age >= 18 && c.partner == null && !c.extra.length));
     const taken = new Set();
     for (const c of singles) {
       if (taken.has(c.id) || !chance(0.05)) continue;
-      const pool = singles.filter((d) => d !== c && !taken.has(d.id) && Math.abs(d.age - c.age) <= 14 && !c.parents.includes(d.id) && !d.parents.includes(c.id) && !(c.parents.length && c.parents.some((p) => d.parents.includes(p))));
+      const pool = singles.filter((d) => d !== c && !taken.has(d.id) && Math.abs(d.age - c.age) <= 14 && !kin(c, d) && ((attracted(c, d) && attracted(d, c)) || compelled(c, d)));
       if (!pool.length) continue;
       const d = pool.find((x) => c.friends.includes(x.id)) || pick(pool);
       let affinity = (c.friends.includes(d.id) ? 0.5 : 0.15) + (has(c, 'Romantic') || has(d, 'Romantic') ? 0.2 : 0) + (c.party != null && c.party === d.party ? 0.1 : 0) - ((c.grudges[d.id] || 0) + (d.grudges[c.id] || 0)) / 100;
+      if (!(attracted(c, d) && attracted(d, c))) affinity *= 0.5;
       if (!chance(Math.max(0, affinity) * 0.5)) continue;
-      // the law
-      let deter = 0, lawHit = [];
-      for (const L of S.laws) {
-        if (L.beh !== 'partner' || !RULES[L.rule].violation) continue;
-        for (const x of [c, d]) {
-          if (!governs(L, x)) continue;
-          const broke = L.rule === 'ban' || (L.rule === 'ration' && (x.life.partner || 0) >= 1) || (L.rule === 'license' && !x.licenses.includes(L.id));
-          if (L.rule === 'license' && !x.licenses.includes(L.id) && x.scrip >= CC.LICENSE_FEE) { x.licenses.push(L.id); x.scrip -= CC.LICENSE_FEE; S.treasury += CC.LICENSE_FEE; continue; }
-          if (broke) { deter += deterrent(x, L); lawHit.push({ c: x, L }); }
-        }
-      }
-      for (const L of S.laws) if (L.beh === 'partner' && (L.rule === 'tax' || L.rule === 'subsidise' || L.rule === 'reward') && governs(L, c)) {
-        if (L.rule === 'tax') { const pay = Math.min(c.scrip, L.amount); c.scrip -= pay; S.treasury += pay; deter += L.amount * 2; }
-        if (L.rule === 'subsidise') { c.scrip += L.amount; S.treasury -= L.amount; deter -= L.amount * 2; }
-        if (L.rule === 'reward') deter -= 10;
-      }
+      const pl = pairLaw(c, d, false);
       const want = lifeLike(c, 'partner') + rnd() * 20;
-      if (want - deter <= 0) continue;
-      pair(c, d); taken.add(c.id); taken.add(d.id);
-      R.life.push(`${c.first} and ${d.first} have become partners${lawHit.length ? ', against the law' : ''}.`);
-      log(`${c.first} ${c.last} and ${d.first} ${d.last} became partners.`, 'life');
-      for (const v of lawHit) punishLife(v.c, v.L, R, 'forming a partnership');
+      if (want - pl.deter <= 0) continue;
+      taken.add(c.id); taken.add(d.id);
+      sealPair(c, d, false, pl);
     }
-    // break-ups
-    for (const c of npcFree()) {
-      const p = P(c.partner);
-      if (!p || c.id > p.id || !alive(p)) continue;
-      const strain = ((c.grudges[p.id] || 0) + (p.grudges[c.id] || 0)) / 100 + (c.needs.belonging < 20 ? 0.01 : 0);
-      if (chance(0.0015 + strain * 0.02)) {
-        c.partner = null; p.partner = null; c.needs.belonging -= 20; p.needs.belonging -= 20;
-        R.life.push(`${c.first} and ${p.first} have split up.`);
-        log(`${c.first} ${c.last} and ${p.first} ${p.last} split up.`, 'life');
+    // more than one partner
+    for (const c of shuffle(npcFree().filter((x) => x.age >= 18 && x.partner != null && !taken.has(x.id)))) {
+      const like = lifeLike(c, 'polygamy');
+      const pushed = lifeLaws(c, 'polygamy').some((L) => L.rule === 'require' || L.rule === 'subsidise' || L.rule === 'reward');
+      if (!chance(pushed ? 0.03 : like > 8 ? 0.008 : 0.0008)) continue;
+      const pool = npcFree().filter((d) => d !== c && d.age >= 18 && !taken.has(d.id) && !partnersOf(c).includes(d.id) && Math.abs(d.age - c.age) <= 16 && !kin(c, d) && attracted(c, d) && attracted(d, c) && (partnersOf(d).length === 0 || lifeLike(d, 'polygamy') > 0));
+      if (!pool.length) continue;
+      const d = pool.find((x) => c.friends.includes(x.id)) || pick(pool);
+      const pl = pairLaw(c, d, true);
+      const want = like + Math.max(0, lifeLike(d, 'polygamy')) * 0.5 + rnd() * 20 + (pushed ? 30 : 0);
+      if (want - pl.deter <= 0) continue;
+      taken.add(c.id); taken.add(d.id);
+      for (const q of livePartners(c)) if (!q.isPlayer && lifeLike(q, 'polygamy') < 0 && !lifeLaws(q, 'polygamy').some((L) => L.rule === 'require')) { q.grudges[c.id] = (q.grudges[c.id] || 0) + 25; q.needs.belonging -= 15; if (chance(0.5)) R.life.push(`${q.first} is not happy about it.`); }
+      sealPair(c, d, true, pl);
+    }
+    // couples living against the law: some are caught, some give each other up
+    const seen = new Set();
+    for (const c of free()) for (const q of livePartners(c)) {
+      const key = Math.min(c.id, q.id) + '-' + Math.max(c.id, q.id);
+      if (seen.has(key)) continue; seen.add(key);
+      const kinds = []; if (sameSex(c, q)) kinds.push('samesex'); if (c.extra.includes(q.id)) kinds.push('polygamy');
+      let ended = false;
+      for (const b of kinds) for (const x of [c, q]) for (const L of lifeLaws(x, b)) {
+        if (ended || L.rule !== 'ban' || x.status !== 'free') continue;
+        if (x.isPlayer && leaderIsPlayer()) continue;
+        if (chance(catchRate(L) * 0.05)) applyPunishment(x, L.pun, { why: `for ${DOING[b]} against “${L.name}”`, how: 'found out', method: L.method, setting: L.setting, R });
+        else if (!x.isPlayer && chance(deterrent(x, L) / 900)) { unpair(c, q); ended = true; R.life.push(`${Nm(c)} and ${nm(q)} ended ${b === 'samesex' ? 'their relationship' : 'their arrangement'} rather than risk “${L.name}”.`); }
       }
+    }
+    // break-ups and divorce
+    for (const c of npcFree()) for (const q of livePartners(c)) {
+      if (!q.isPlayer && c.id > q.id) continue;
+      if (!partnersOf(c).includes(q.id)) continue;
+      const strain = ((c.grudges[q.id] || 0) + (q.grudges[c.id] || 0)) / 100 + (c.needs.belonging < 20 ? 0.01 : 0);
+      let pr = 0.0015 + strain * 0.02;
+      const laws = lifeLaws(c, 'divorce');
+      let deter = 0, hit = null;
+      for (const L of laws) {
+        const broke = L.rule === 'ban' || (L.rule === 'ration' && (c.life.divorce || 0) >= 1) || (L.rule === 'license' && !c.licenses.includes(L.id) && c.scrip < CC.LICENSE_FEE);
+        if (L.rule === 'license' && !c.licenses.includes(L.id) && c.scrip >= CC.LICENSE_FEE) { c.licenses.push(L.id); c.scrip -= CC.LICENSE_FEE; S.treasury += CC.LICENSE_FEE; }
+        if (broke) { deter += deterrent(c, L); hit = hit || L; }
+        if (L.rule === 'tax') deter += L.amount * 2;
+        if (L.rule === 'subsidise') pr *= 1.6;
+        if (L.rule === 'reward') pr *= 1.3;
+        if (L.rule === 'require') pr += 0.01;
+      }
+      if (!chance(pr)) continue;
+      const want = Math.max(lifeLike(c, 'divorce'), 0) + 25 + rnd() * 20;
+      if (deter > want) {
+        c.needs.freedom -= 10; c.needs.belonging -= 5; c.grudges[q.id] = (c.grudges[q.id] || 0) + 5;
+        if (chance(0.4)) R.life.push(`${c.first} wants out of the partnership with ${nm(q)}, but “${hit.name}” forbids it.`);
+        continue;
+      }
+      unpair(c, q);
+      for (const x of [c, q]) { x.needs.belonging -= 20; x.life.divorce = (x.life.divorce || 0) + 1; x.lastDivorce = S.day; }
+      lawMoney(c, 'divorce');
+      R.life.push(`${c.first} and ${nm(q)} have ${laws.length ? 'divorced' : 'split up'}${hit ? ', against the law' : ''}.`);
+      log(`${c.first} ${c.last} and ${q.isPlayer ? 'you' : q.first + ' ' + q.last} split up.`, 'life');
+      if (hit) punishLife(c, hit, R, 'divorcing');
     }
     // children
     for (const c of npcFree()) {
@@ -1009,6 +1191,9 @@
       if (c.age < 16) continue;
       let want = leaveWant(c);
       if (S.laws.some((L) => L.beh === 'leave' && L.rule === 'require' && governs(L, c))) want += 60;
+      if (CC.inSameSex(c) && S.laws.some((L) => L.beh === 'samesex' && L.rule === 'ban' && governs(L, c))) want += 22;
+      if (c.orient === 'gay' && S.laws.some((L) => L.beh === 'samesex' && L.rule === 'ban' && governs(L, c) && PUN[L.pun].sev >= 40)) want += 10;
+      if (c.orient === 'straight' && S.laws.some((L) => L.beh === 'samesex' && L.rule === 'require' && governs(L, c))) want += 18;
       for (const L of S.laws) if (applies(L, c) && RULES[L.rule].violation && PUN[L.pun].sev >= 70 && (c.lawSupport[L.id] || 0) < -40) want += 15;
       const trap = trapped(c, true);
       if (trap && PUN[trap[0].pun].sev + PUN[trap[1].pun].sev >= 80) { want += 70; c._trap = trap; }
@@ -1052,11 +1237,11 @@
   function admitGroup(g, R) {
     const made = [];
     for (const o of g) {
-      const c = makePerson({ age: o.age, last: o.last, opinion: 10, govt: 20, arrived: S.day, trade: o.kid ? 'child' : undefined });
+      const c = makePerson({ age: o.age, last: o.last, opinion: 10, govt: 20, arrived: S.day, trade: o.kid ? 'child' : undefined, sex: o.sex });
       made.push(c);
     }
     const adults = made.filter((c) => c.age >= 16);
-    if (adults.length === 2) pair(adults[0], adults[1]);
+    if (adults.length === 2) { adults[0].orient = fitOrient(adults[0], adults[1]); adults[1].orient = fitOrient(adults[0], adults[1]); pair(adults[0], adults[1]); }
     for (const k of made.filter((c) => c.age < 16)) { k.parents = adults.map((a) => a.id); for (const a of adults) { a.children.push(k.id); befriend(a, k); } }
     // they make a friend or two
     for (const c of made) for (const f of shuffle(npcFree().filter((x) => !made.includes(x))).slice(0, 1)) befriend(c, f);
@@ -1070,7 +1255,7 @@
     const rep = clamp((wellbeing() / 60) * (0.5 + S.legitimacy / 120) * (S.attention > 60 ? 0.7 : 1), 0.2, 1.5);
     if (!chance(0.08 * rep * (crowding() > 1.2 ? 0.5 : 1) * clamp(1.6 - here().length / 50, 0.15, 1))) return;
     const g = arrivalGroup();
-    g.forEach((o) => { o.first = pickFirst(); });
+    g.forEach((o, i) => { o.sex = i === 1 && o.couple ? (chance(0.1) ? g[0].sex : g[0].sex === 'm' ? 'f' : 'm') : o.kid ? (chance(0.5) ? 'm' : 'f') : (chance(0.5) ? 'm' : 'f'); o.first = pickFirst(o.sex); });
     const traitsPreview = g.filter((x) => !x.kid).map(() => randTraits(2));
     g.filter((x) => !x.kid).forEach((o, i) => { o.traits = traitsPreview[i]; o.trade = randTrade(); });
     if (S.gov.gate === 'open') {
@@ -1103,6 +1288,8 @@
       const felt = S.laws.filter((L) => applies(L, c) || c.motive !== 'self');
       if (felt.length) d += (felt.reduce((n, L) => n + (c.lawSupport[L.id] || 0), 0) / felt.length) * 0.03 + felt.filter((L) => (c.lawSupport[L.id] || 0) < -30).length * -0.25;
       if (S.treasury < 0 && c.trade === 'warden') d -= 1.5;
+      if (c.age >= 16 && !c.retired) d += clamp((S.gov.wage - CC.DEFAULT_WAGE) * 0.25, -1.2, 0.8) + (c.unpaid ? -1 : 0);
+      if (S.gov.salary > 5 && c.motive !== 'self') d -= Math.min(1, (S.gov.salary - 5) * 0.05);
       const fr = c.friends.map(P).filter((x) => x && x.status === 'free' && !x.isPlayer);
       if (fr.length) d += (fr.reduce((n, x) => n + x.govt, 0) / fr.length - c.govt) * 0.06;
       if (has(c, 'Loyal')) d += 0.6;
@@ -1134,7 +1321,7 @@
     }
     S.legitimacy = clamp(S.legitimacy + (approval() - S.legitimacy) * 0.04, 0, 100);
     S.attention = clamp(S.attention - 0.3, 0, 100);
-    S.exposure = clamp(S.exposure - 0.4, 0, 100);
+    S.exposure = clamp(S.exposure - (S.owned && S.owned.villa ? 0.8 : 0.4), 0, 100);
     const after = { approval: approval(), legit: S.legitimacy, fear: avgFear(), standing: standing() };
     const arrow = (a, b) => (b - a > 0.5 ? `up ${Math.round(b - a)}` : b - a < -0.5 ? `down ${Math.round(a - b)}` : 'steady');
     R.mood.unshift(`Government approval ${arrow(before.approval, after.approval)} to ${Math.round(after.approval)}. Your standing ${arrow(before.standing, after.standing)} to ${Math.round(after.standing)}. Fear ${arrow(before.fear, after.fear)} to ${Math.round(after.fear)}. Legitimacy ${arrow(before.legit, after.legit)} to ${Math.round(after.legit)}.`);
@@ -1174,6 +1361,7 @@
     if (!S.over) CC.politics(R);
     if (!S.over) updateOpinions(R, before);
     morning(R);
+    syncBuilt();
     const pop = here().length;
     S.peakPop = Math.max(S.peakPop, pop);
     S.history.push({ day: S.day, pop, approval: Math.round(approval()), standing: Math.round(standing()), legitimacy: Math.round(S.legitimacy), fear: Math.round(avgFear()), food: Math.round(S.food), treasury: Math.round(S.treasury) });
@@ -1186,8 +1374,22 @@
     S.addressToday = false; S.rally = false; S.pdid = []; S.campaignToday = 0; S.dayNotes = [];
     for (const c of S.people) if (c.status === 'detained') { c.detained--; if (c.detained <= 0) { c.status = 'free'; if (c.isPlayer) R.headlines.push('You were released from the lock-up.'); } }
     const me = player();
+    // your own costs: aides and bodyguards are paid from your pocket
+    const own = S.owned || (S.owned = { aides: 0, guards: false, villa: false, clothes: false });
+    let bill = own.aides * CC.SHOP.aide.upkeep + (own.guards ? CC.SHOP.guards.upkeep : 0);
+    if (bill > 0) {
+      if (me.scrip >= bill) { me.scrip -= bill; }
+      else {
+        if (own.guards) { own.guards = false; R.headlines.push('You could not pay your bodyguards, so they left.'); bill -= CC.SHOP.guards.upkeep; }
+        if (me.scrip < bill && own.aides > 0) { own.aides--; R.headlines.push('You could not pay your aide, so they quit.'); bill -= CC.SHOP.aide.upkeep; }
+        me.scrip = Math.max(0, me.scrip - Math.max(0, bill));
+      }
+    }
+    S.apMax = 3 + own.aides;
+    S.otToday = 0;
     S.ap = me.status === 'free' ? Math.max(0, S.apMax - S.apPenalty) : 0;
     S.apPenalty = 0;
+    me.wage = 0;
     for (const L of S.laws) if (L.from === S.day) R.headlines.push(`“${L.name}” is now in force.`);
     if (S.day % YEAR === 0) { R.headlines.push(`A new year begins: Year ${Math.floor(S.day / YEAR) + 1}.`); yearlyCensus(R); }
     CC.morningEvents && CC.morningEvents(R);
@@ -1198,12 +1400,28 @@
       if (L.rule !== 'require' || BEH[L.beh].kind !== 'life' || !active(L)) continue;
       for (const c of free()) {
         if (!governs(L, c)) continue;
-        const did = L.beh === 'partner' ? c.partner != null : L.beh === 'child' ? c.children.some((k) => P(k) && S.day - P(k).arrived < YEAR + 1) : false;
+        const did = L.beh === 'partner' ? partnersOf(c).length > 0 : L.beh === 'child' ? c.children.some((k) => P(k) && S.day - P(k).arrived < YEAR + 1)
+          : L.beh === 'samesex' ? CC.inSameSex(c) : L.beh === 'polygamy' ? partnersOf(c).length >= 2 : L.beh === 'divorce' ? c.lastDivorce != null && S.day - c.lastDivorce <= YEAR : false;
         if (!did && L.beh !== 'leave') { if (c.isPlayer && leaderIsPlayer()) continue; applyPunishment(c, L.pun, { why: `for not obeying “${L.name}” this year`, how: 'named in the census', method: L.method, setting: L.setting, R }); }
         if (L.beh === 'leave' && !c.isPlayer && chance(0.5)) { c.status = 'fled'; R.headlines.push(`${c.first} left, as “${L.name}” requires.`); }
       }
     }
   }
+
+  // The order buildings were fitted out in, so the yard map keeps everything where it was.
+  function syncBuilt() {
+    if (!S.built) S.built = [];
+    const want = Object.assign({}, S.buildings);
+    const have = {};
+    for (const k of S.built) have[k] = (have[k] || 0) + 1;
+    for (const k of Object.keys(have)) {
+      let extra = have[k] - (want[k] || 0);
+      for (let i = S.built.length - 1; i >= 0 && extra > 0; i--) if (S.built[i] === k) { S.built.splice(i, 1); extra--; }
+    }
+    for (const [k, n] of Object.entries(want)) for (let i = have[k] || 0; i < n; i++) S.built.push(k);
+    return S.built;
+  }
+  CC.syncBuilt = syncBuilt;
 
   // ───────────────────────── exports ─────────────────────────
   CC.useState = (s) => { S = s; CC.S = s; if (CC._politicsUse) CC._politicsUse(s); };
