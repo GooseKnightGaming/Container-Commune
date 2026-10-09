@@ -2,7 +2,7 @@
 
 A society sim by GooseKnightGaming. A yard of shipping containers has broken away from the country to run itself. Write its laws, live with its people, and keep hold of power, or take it.
 
-Current version: **V3**. Plain HTML, CSS and JavaScript. No libraries, no build step.
+Current version: **V4**. Plain HTML, CSS and JavaScript. No libraries, no build step.
 
 ## Play locally
 Open `index.html` in a browser.
@@ -21,11 +21,13 @@ The game saves itself in the browser. The Chronicle tab has a save code you can 
 ## How a day works
 1. Read the report: what happened yesterday. Watch it happen again on the **Yard** map.
 2. Answer any decisions waiting, including laws your citizens bring you.
-3. Spend your **3 actions** (you can pay for more). Most actions are on people: click anyone to get to know them, help them, court them, invite them to your party, bribe, threaten, smear, recruit to a plot, or (as leader) arrest, release or worse.
+3. Spend your **3 actions** (you can pay for more). Punishments such as community service or a flogging can cost you actions the next morning; the report says why, and you always keep at least one unless you're in the lock-up. Most actions are on people: click anyone to get to know them, help them, court them, invite them to your party, bribe, threaten, smear, recruit to a plot, or (as leader) arrest, release or worse.
 4. Write laws in the Laws tab, manage your party and platform in Politics, build and trade in Commune.
 5. **End the day.** Citizens choose what to do, the law catches some of them, people eat, fall in love, have children, arrive, leave, die, vote and plot.
 
 ## Laws
+The law builder walks you through it in steps: pick a policy area (work and money, families and relationships, education, welfare and community, public order and justice, faith and culture, politics and dissent), then what it's about, then what the law does (ban it, require it, limit it, permit only, tax it, pay for it, honour it, or for schools, encourage or discourage it), then who it applies to, then how it's enforced and punished. It suggests a name, and reads the whole law back before you pass it.
+
 A law is a sentence built from parts: **who** + **rule** + **behaviour**, enforced by **enforcement**, punished by **punishment**.
 
 - **Who:** all citizens, adults, children, elders, everyone 60 and over, retired citizens, trans citizens, men, women, non-binary citizens, people in same-sex relationships, newcomers, founders, partnered or single people, parents, officials, people in no party, any trade, or the members of any party.
@@ -84,6 +86,11 @@ Executed, exiled, assassinated, overthrown, taken back by the outside world, col
 Join, leave, found or challenge for the leadership of a party. If you lead one, you can disband it. You can try to outlaw a rival party, unless it's the ruling party, holds a council majority, or counts most adults as members: as ruler you can simply decree it; in a democracy it goes to a vote. An outlawed party can't stand for election, its members bleed away, and party work is punished by whatever you chose. Harsh rulers will do the same to their rivals, possibly yours. The Politics tab has a full table of where every party, you and the public stand on every issue.
 
 ## Changelog
+**V4**
+- A step-by-step law builder: policy area first, then topic, then what the law does, so earlier choices shape the later ones.
+- Fixed: punishments could silently take away all of your actions for a day. Now you always keep at least one while free, and the report and Today tab say exactly what cost you actions.
+- The night is now protected against errors: if any part of it fails, the day still ends and your actions still come back.
+
 **V3**
 - Laws on retirement (bans, requirements, pensions), gender identity, and what schools can, can't, should and shouldn't teach, with lasting effects on children.
 - Disband your own party; try to outlaw a rival. Outlawed parties fade, and AI rulers can outlaw parties too.

@@ -316,3 +316,16 @@ td.pub { display: flex; align-items: center; gap: 8px; }
 .subjects { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
 .subjects li { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 8px; align-items: center; font-size: 14px; }
 .subjects li .small { grid-column: 1 / -1; margin-top: -2px; }
+
+/* V4: step-by-step law builder */
+.lb { display: grid; gap: 14px; margin-bottom: 14px; }
+.lbstep { display: grid; gap: 7px; }
+.lbh { display: flex; align-items: center; gap: 8px; font: 700 11.5px/1 var(--font-mono); letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); }
+.lbn { display: inline-grid; place-items: center; width: 20px; height: 20px; border-radius: 50%; background: var(--ink); color: var(--surface); font-size: 11px; letter-spacing: 0; }
+.lchips { display: flex; flex-wrap: wrap; gap: 6px; }
+.lchip { border: 1px solid var(--line); background: var(--surface-2); padding: 6px 11px; border-radius: 999px; font-size: 13.5px; font-weight: 600; color: var(--ink); line-height: 1.2; }
+.lchip:hover { border-color: var(--ink); }
+.lchip.on { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.lbpair { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 8px; }
+.lbfull { font-size: 16px; line-height: 1.45; padding: 10px 12px; border: 2px solid var(--ink); border-radius: 4px; background: var(--surface-2); margin-bottom: 4px; }
+.warnline { color: var(--warn); font-weight: 600; margin-bottom: 8px; }
