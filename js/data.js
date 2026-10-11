@@ -7,7 +7,7 @@
   'use strict';
   const CC = (root.CC = root.CC || {});
   CC.inSameSex = (c) => { const S = CC.S; if (!S) return false; const ps = [c.partner, ...(c.extra || [])].filter((x) => x != null).map((id) => S.people[id]); return ps.some((p) => p && p.sex === c.sex && c.sex !== 'x' && (p.status === 'free' || p.status === 'detained')); };
-  CC.VERSION = 'V5';
+  CC.VERSION = 'V6';
   CC.YEAR = 24;                       // days in a year (4 seasons of 6 days)
   CC.SEASONS = ['Spring', 'Summer', 'Autumn', 'Winter'];
   CC.ADULT = 16;                      // age of majority: can work, vote and stand

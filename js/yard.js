@@ -106,6 +106,10 @@
   }
 
   // ───────────────────────── the still picture ─────────────────────────
+  // (V6) the yard as it is: asphalt with painted lines, a concrete plaza, containers with
+  // depth, rust and door bars, lamp posts, a chain-link fence (or a wall). Its own palette,
+  // the same in light and dark mode: it is a place, not a page.
+  const YC = { asphalt: '#3a3f43', asphalt2: '#34383c', road: '#2c3034', plaza: '#8f8a80', plaza2: '#86817a', paint: '#e7b53b', white: '#e9e4d8', fence: '#9aa1a6', shadow: 'rgba(0,0,0,0.38)' };
   function paintStatic(v) {
     const S = CC.S, L = v.L;
     const dpr = Math.min(2, window.devicePixelRatio || 1);
@@ -118,87 +122,144 @@
     v.dpr = dpr;
     const ink = css('--ink'), line = css('--line'), surf = css('--surface'), surf2 = css('--surface-2'), muted = css('--muted');
     v.colors = { ink, line, surf, surf2, muted, accent: css('--accent'), blue: css('--blue'), bad: css('--bad'), good: css('--good'), warn: css('--warn') };
-    // ground: gravel
-    g.fillStyle = surf2; g.fillRect(0, 0, L.W, L.H);
-    g.fillStyle = line;
-    for (let i = 0; i < (L.W * L.H) / 260; i++) { const x = hash(i * 3) * L.W, y = hash(i * 7 + 1) * L.H; g.globalAlpha = 0.25 + hash(i) * 0.35; g.fillRect(x, y, 1.2, 1.2); }
-    g.globalAlpha = 1;
+    // asphalt, with grain and the odd crack and oil stain
+    g.fillStyle = YC.asphalt; g.fillRect(0, 0, L.W, L.H);
+    for (let i = 0; i < (L.W * L.H) / 40; i++) { const x = hash(i * 3) * L.W, y = hash(i * 7 + 1) * L.H, k = hash(i * 11); g.fillStyle = k < 0.5 ? 'rgba(0,0,0,0.18)' : 'rgba(255,255,255,0.05)'; g.fillRect(x, y, 1.3, 1.3); }
+    for (let i = 0; i < 7; i++) { const x = hash(i * 91) * L.W, y = hash(i * 37 + 5) * L.H, r = 6 + hash(i * 13) * 16; const gr = g.createRadialGradient(x, y, 0, x, y, r); gr.addColorStop(0, 'rgba(0,0,0,0.28)'); gr.addColorStop(1, 'rgba(0,0,0,0)'); g.fillStyle = gr; g.beginPath(); g.ellipse(x, y, r, r * 0.6, hash(i) * 3, 0, Math.PI * 2); g.fill(); }
+    g.strokeStyle = 'rgba(0,0,0,0.35)'; g.lineWidth = 1;
+    for (let i = 0; i < 6; i++) { let x = hash(i * 17 + 3) * L.W, y = hash(i * 29 + 7) * L.H; g.beginPath(); g.moveTo(x, y); for (let k = 0; k < 5; k++) { x += (hash(i * 5 + k) - 0.5) * 24; y += (hash(i * 7 + k * 3) - 0.3) * 14; g.lineTo(x, y); } g.stroke(); }
     const season = Math.floor((S.day % CC.YEAR) / (CC.YEAR / 4));
-    if (season === 3) { g.fillStyle = 'rgba(255,255,255,0.10)'; g.fillRect(0, 0, L.W, L.H); }
-    if (season === 1) { g.fillStyle = 'rgba(220,180,90,0.06)'; g.fillRect(0, 0, L.W, L.H); }
-    // the road along the side, and the plaza
-    g.fillStyle = surf; g.globalAlpha = 0.85;
-    g.fillRect(L.margin, L.margin, L.road, L.H - L.margin * 2);
-    g.globalAlpha = 1;
+    if (season === 3) { g.fillStyle = 'rgba(235,240,245,0.16)'; g.fillRect(0, 0, L.W, L.H); }
+    if (season === 1) { g.fillStyle = 'rgba(220,180,90,0.05)'; g.fillRect(0, 0, L.W, L.H); }
+    // the road along the side: darker, with a dashed white line
+    g.fillStyle = YC.road; g.fillRect(L.margin, L.margin, L.road, L.H - L.margin * 2);
+    g.strokeStyle = 'rgba(233,228,216,0.55)'; g.lineWidth = 1.5; g.setLineDash([7, 7]);
+    g.beginPath(); g.moveTo(L.roadX, L.margin + 6); g.lineTo(L.roadX, L.H - L.margin - 6); g.stroke(); g.setLineDash([]);
+    // the aisles between rows of containers: a painted yellow walkway edge
+    g.strokeStyle = 'rgba(231,181,59,0.45)'; g.lineWidth = 1.2;
+    const rowsY = [...new Set(L.items.map((it) => it.door.plaza ? null : it.door.y).filter((y) => y != null))];
+    for (const y of rowsY) { g.setLineDash([10, 6]); g.beginPath(); g.moveTo(L.roadX + L.road / 2 + 4, y); g.lineTo(L.W - L.margin, y); g.stroke(); }
+    g.setLineDash([]);
+    // the plaza: poured concrete in slabs, with the commune's name painted on it
     const P = L.plaza;
-    g.fillStyle = surf; g.fillRect(P.x, P.y, P.w, P.h);
-    g.strokeStyle = line; g.lineWidth = 1; g.setLineDash([4, 4]);
-    g.strokeRect(P.x + 0.5, P.y + 0.5, P.w - 1, P.h - 1); g.setLineDash([]);
-    // the commune's name, painted on the concrete
-    g.save(); g.fillStyle = ink; g.globalAlpha = 0.07; g.textAlign = 'center'; g.textBaseline = 'middle';
+    g.fillStyle = YC.shadow; g.fillRect(P.x + 2, P.y + 2, P.w, P.h);
+    g.fillStyle = YC.plaza; g.fillRect(P.x, P.y, P.w, P.h);
+    for (let i = 0; i < 260; i++) { g.fillStyle = hash(i * 5 + 2) < 0.5 ? 'rgba(0,0,0,0.06)' : 'rgba(255,255,255,0.06)'; g.fillRect(P.x + hash(i * 3 + 1) * P.w, P.y + hash(i * 7) * P.h, 2, 2); }
+    g.strokeStyle = 'rgba(0,0,0,0.12)'; g.lineWidth = 1;
+    for (let x = P.x + 36; x < P.x + P.w; x += 36) { g.beginPath(); g.moveTo(x + 0.5, P.y); g.lineTo(x + 0.5, P.y + P.h); g.stroke(); }
+    g.beginPath(); g.moveTo(P.x, P.y + P.h / 2 + 0.5); g.lineTo(P.x + P.w, P.y + P.h / 2 + 0.5); g.stroke();
+    g.strokeStyle = YC.paint; g.lineWidth = 2; g.strokeRect(P.x + 3, P.y + 3, P.w - 6, P.h - 6);
+    g.save(); g.fillStyle = YC.white; g.globalAlpha = 0.22; g.textAlign = 'center'; g.textBaseline = 'middle';
     g.font = `400 ${Math.min(P.h * 0.5, P.w / Math.max(6, S.name.length) * 1.4)}px "Allerta Stencil", Impact, sans-serif`;
     g.fillText(S.name.toUpperCase(), P.x + P.w * 0.5, P.y + P.h * 0.56); g.restore();
-    // stage, standpipe, notice board
-    g.fillStyle = ink; g.globalAlpha = 0.75; g.fillRect(L.stage.x - 14, L.stage.y - 8, 28, 6); g.globalAlpha = 1;
-    g.fillStyle = v.colors.blue; g.beginPath(); g.arc(L.pipe.x, L.pipe.y, 3.5, 0, Math.PI * 2); g.fill();
-    g.fillStyle = muted; g.font = '600 9px "IBM Plex Mono", monospace'; g.textAlign = 'center';
-    if (!L.compact) { g.fillText('STAGE', L.stage.x, L.stage.y + 9); g.fillText('STANDPIPE', L.pipe.x, L.pipe.y + 13); }
-    // the fence (a wall if one has been built) with the gate
+    // the stage: a little timber platform; the standpipe with its puddle
+    const sx0 = L.stage.x - 18, sy0 = L.stage.y - 10;
+    g.fillStyle = YC.shadow; g.fillRect(sx0 + 2, sy0 + 2, 36, 9);
+    g.fillStyle = '#7a5532'; g.fillRect(sx0, sy0, 36, 9);
+    g.strokeStyle = 'rgba(0,0,0,0.3)'; for (let x = sx0 + 6; x < sx0 + 36; x += 6) { g.beginPath(); g.moveTo(x + 0.5, sy0); g.lineTo(x + 0.5, sy0 + 9); g.stroke(); }
+    const pud = g.createRadialGradient(L.pipe.x, L.pipe.y + 3, 0, L.pipe.x, L.pipe.y + 3, 12);
+    pud.addColorStop(0, 'rgba(90,120,150,0.55)'); pud.addColorStop(1, 'rgba(90,120,150,0)');
+    g.fillStyle = pud; g.beginPath(); g.ellipse(L.pipe.x, L.pipe.y + 3, 12, 7, 0, 0, Math.PI * 2); g.fill();
+    g.fillStyle = '#2f6fa3'; g.beginPath(); g.arc(L.pipe.x, L.pipe.y, 3.5, 0, Math.PI * 2); g.fill();
+    g.fillStyle = '#9fd0f5'; g.fillRect(L.pipe.x - 1, L.pipe.y - 1, 2, 2);
+    g.fillStyle = 'rgba(233,228,216,0.75)'; g.font = '600 9px "IBM Plex Mono", monospace'; g.textAlign = 'center';
+    if (!L.compact) { g.fillText('STAGE', L.stage.x, L.stage.y + 11); g.fillText('STANDPIPE', L.pipe.x, L.pipe.y + 16); }
+    // lamp posts round the plaza (they light up at night)
+    L.lamps = [];
+    for (let k = 0; k < 4; k++) L.lamps.push({ x: P.x + P.w * (0.12 + k * 0.26), y: k % 2 ? P.y + 6 : P.y + P.h - 6 });
+    L.lamps.push({ x: L.roadX, y: L.gate.y - 30 }, { x: L.roadX, y: L.gate.y + 30 });
+    for (const lp of L.lamps) { g.fillStyle = YC.shadow; g.beginPath(); g.arc(lp.x + 1.5, lp.y + 1.5, 3, 0, Math.PI * 2); g.fill(); g.fillStyle = '#5b6266'; g.beginPath(); g.arc(lp.x, lp.y, 3, 0, Math.PI * 2); g.fill(); g.fillStyle = '#f3e3b0'; g.beginPath(); g.arc(lp.x, lp.y, 1.4, 0, Math.PI * 2); g.fill(); }
+    // the fence: chain-link on posts, or a concrete wall if one has been built; the gate
     const walled = !!S.buildings.wall;
-    g.strokeStyle = walled ? ink : muted; g.lineWidth = walled ? 3 : 1.2; g.setLineDash(walled ? [] : [2, 3]);
     const gx = 4, gy1 = L.gate.y - 14, gy2 = L.gate.y + 14;
-    g.beginPath();
-    g.moveTo(gx, gy1); g.lineTo(gx, 4); g.lineTo(L.W - 4, 4); g.lineTo(L.W - 4, L.H - 4); g.lineTo(gx, L.H - 4); g.lineTo(gx, gy2);
-    g.stroke(); g.setLineDash([]);
-    g.fillStyle = v.colors.accent; g.fillRect(gx - 2, gy1 - 3, 5, 4); g.fillRect(gx - 2, gy2 - 1, 5, 4);
-    g.save(); g.translate(gx + 9, L.gate.y); g.rotate(-Math.PI / 2); g.fillStyle = muted; g.font = '600 9px "IBM Plex Mono", monospace'; g.textAlign = 'center'; g.fillText('GATE', 0, 3); g.restore();
+    const fencePath = () => { g.beginPath(); g.moveTo(gx, gy1); g.lineTo(gx, 4); g.lineTo(L.W - 4, 4); g.lineTo(L.W - 4, L.H - 4); g.lineTo(gx, L.H - 4); g.lineTo(gx, gy2); };
+    if (walled) { g.strokeStyle = '#b8b2a6'; g.lineWidth = 5; fencePath(); g.stroke(); g.strokeStyle = 'rgba(0,0,0,0.3)'; g.lineWidth = 1; fencePath(); g.stroke(); }
+    else {
+      g.strokeStyle = YC.fence; g.lineWidth = 1; g.setLineDash([1, 2]); fencePath(); g.stroke(); g.setLineDash([]);
+      g.fillStyle = '#c3c8cc';
+      const posts = [[gx, gy1], [gx, 4], [L.W - 4, 4], [L.W - 4, L.H - 4], [gx, L.H - 4], [gx, gy2]];
+      for (let i = 0; i + 1 < posts.length; i++) { const [ax, ay] = posts[i], [bx, by] = posts[i + 1], n = Math.max(1, Math.floor(Math.hypot(bx - ax, by - ay) / 40)); for (let k = 0; k <= n; k++) g.fillRect(ax + (bx - ax) * k / n - 1, ay + (by - ay) * k / n - 1, 2.5, 2.5); }
+    }
+    g.fillStyle = YC.paint; g.fillRect(gx - 2, gy1 - 3, 5, 4); g.fillRect(gx - 2, gy2 - 1, 5, 4);
+    g.strokeStyle = YC.paint; g.lineWidth = 1; g.setLineDash([3, 3]); g.beginPath(); g.moveTo(gx, gy1); g.lineTo(gx, gy2); g.stroke(); g.setLineDash([]);
+    g.save(); g.translate(gx + 9, L.gate.y); g.rotate(-Math.PI / 2); g.fillStyle = YC.white; g.font = '600 9px "IBM Plex Mono", monospace'; g.textAlign = 'center'; g.fillText('GATE', 0, 3); g.restore();
     // spare containers, stacked at the end of the plaza
     const spare = S.containers || 0;
     const sw = Math.min(L.cl, W_SPARE), sh = Math.min(L.cw, 14);
-    const sx = P.x + P.w - sw - 8;
+    const sxs = P.x + P.w - sw - 8;
+    const SPARE_COL = ['#7d8a91', '#a35b3a', '#5f7d5c', '#8a7350'];
     for (let i = 0; i < Math.min(spare, 6); i++) {
       const col = Math.floor(i / 2), lay = i % 2;
-      const x = sx - col * 4 - lay * 3, y = P.y + P.h - 10 - sh - col * (sh + 4) - lay * 4;
+      const x = sxs - col * 4 - lay * 3, y = P.y + P.h - 10 - sh - col * (sh + 4) - lay * 4;
       if (y < P.y + 2) break;
-      box(g, x, y, sw, sh, '#9aa3a9', true);
+      box(g, x, y, sw, sh, SPARE_COL[i % SPARE_COL.length], true, false, i + 50);
     }
-    if (spare) { g.fillStyle = muted; g.font = '600 9px "IBM Plex Mono", monospace'; g.textAlign = 'right'; g.fillText(`${spare} SPARE`, P.x + P.w - 8, P.y + P.h - 2 - (spare > 1 ? 0 : 0)); }
+    if (spare) { g.fillStyle = YC.white; g.font = '600 9px "IBM Plex Mono", monospace'; g.textAlign = 'right'; g.fillText(`${spare} SPARE`, P.x + P.w - 8, P.y + P.h - 2); }
     // buildings
-    for (const it of L.items) {
+    L.items.forEach((it, idx) => {
       const B = it.type === 'villa' ? { color: '#d9a62b', short: 'Yours' } : CC.BUILDINGS[it.type];
-      box(g, it.x, it.y, it.w, it.h, B.color, false, it.top);
+      box(g, it.x, it.y, it.w, it.h, B.color, false, it.top, idx);
       const light = it.type === 'clinic' || it.type === 'villa' || it.type === 'school';
       g.save();
       g.fillStyle = light ? '#1b2126' : '#fff';
-      g.shadowColor = light ? 'transparent' : 'rgba(0,0,0,0.55)'; g.shadowBlur = 2;
+      g.shadowColor = light ? 'transparent' : 'rgba(0,0,0,0.6)'; g.shadowBlur = 2;
       const label = (B.short || B.label).toUpperCase();
       if (it.size > 1) {
-        g.font = `600 ${L.cw < 15 ? 8 : 9.5}px "IBM Plex Mono", monospace`; g.textAlign = 'center'; g.textBaseline = 'middle';
+        g.font = `400 ${L.cw < 15 ? 9 : 11}px "Allerta Stencil", "IBM Plex Mono", monospace`; g.textAlign = 'center'; g.textBaseline = 'middle';
         if (g.measureText(label).width > it.w - 4) g.font = '600 7px "IBM Plex Mono", monospace';
         g.fillText(label, it.x + it.w / 2, it.y + it.h / 2);
       } else if (L.cw >= 15) {
         g.translate(it.x + it.w / 2, it.y + it.h / 2); g.rotate(-Math.PI / 2);
-        g.font = '600 8px "IBM Plex Mono", monospace'; g.textAlign = 'center'; g.textBaseline = 'middle';
+        g.font = '400 9px "Allerta Stencil", "IBM Plex Mono", monospace'; g.textAlign = 'center'; g.textBaseline = 'middle';
         g.fillText(label.slice(0, 7), 0, 0.5);
       }
       g.restore();
       if (it.type === 'home') {
         const n = L.crowd[L.items.indexOf(it)] || 0;
-        if (n > 2) { g.fillStyle = v.colors.bad; g.beginPath(); g.arc(it.x + it.w - 3, it.top ? it.y + 3 : it.y + it.h - 3, 2.5, 0, Math.PI * 2); g.fill(); }
+        if (n > 2) { g.fillStyle = v.colors.bad; g.beginPath(); g.arc(it.x + it.w - 3, it.top ? it.y + 3 : it.y + it.h - 3, 2.5, 0, Math.PI * 2); g.fill(); g.strokeStyle = '#fff'; g.lineWidth = 0.8; g.stroke(); }
       }
+    });
+  }
+  // a container seen from above: a shadow, the roof with its ribs, a lit edge and a shaded
+  // side (it stands 2.6 m tall), rust and wear, and the door end with its locking bars
+  function box(g, x, y, w, h, color, horizontal, doorDown, seed) {
+    const sd = seed || 0;
+    g.fillStyle = 'rgba(0,0,0,0.42)'; g.fillRect(x + 3, y + 3, w, h);
+    g.fillStyle = shade(color, -0.32); g.fillRect(x, y, w, h);                  // the visible side, in shadow
+    g.fillStyle = color; g.fillRect(x, y, w - (horizontal ? 0 : 2), h - (horizontal ? 2 : 0)); // the roof
+    g.strokeStyle = 'rgba(0,0,0,0.2)'; g.lineWidth = 1;
+    g.beginPath();
+    if (horizontal) for (let i = x + 3; i < x + w - 1; i += 3.5) { g.moveTo(i + 0.5, y + 1); g.lineTo(i + 0.5, y + h - 3); }
+    else for (let i = y + 3; i < y + h - 1; i += 3.5) { g.moveTo(x + 1, i + 0.5); g.lineTo(x + w - 3, i + 0.5); }
+    g.stroke();
+    g.strokeStyle = 'rgba(255,255,255,0.12)';
+    g.beginPath();
+    if (horizontal) for (let i = x + 4.5; i < x + w - 1; i += 3.5) { g.moveTo(i + 0.5, y + 1); g.lineTo(i + 0.5, y + h - 3); }
+    else for (let i = y + 4.5; i < y + h - 1; i += 3.5) { g.moveTo(x + 1, i + 0.5); g.lineTo(x + w - 3, i + 0.5); }
+    g.stroke();
+    // a lit top edge
+    g.fillStyle = 'rgba(255,255,255,0.22)'; g.fillRect(x, y, horizontal ? w : 1.5, horizontal ? 1.5 : h);
+    // rust and wear
+    for (let i = 0; i < 4; i++) {
+      const rx = x + 2 + hash(sd * 31 + i * 7) * (w - 6), ry = y + 2 + hash(sd * 17 + i * 13) * (h - 6), rr = 1.2 + hash(sd * 7 + i) * 2.5;
+      g.fillStyle = `rgba(${120 + (hash(sd + i) * 40) | 0},55,25,${0.25 + hash(sd * 3 + i) * 0.3})`;
+      g.beginPath(); g.ellipse(rx, ry, rr, rr * 0.7, 0, 0, Math.PI * 2); g.fill();
+    }
+    if (!horizontal) {
+      // the door end: darker band with two locking bars
+      const dy = doorDown ? y + h - 4 : y;
+      g.fillStyle = 'rgba(0,0,0,0.38)'; g.fillRect(x, dy, w, 4);
+      g.fillStyle = 'rgba(220,220,220,0.55)';
+      g.fillRect(x + w * 0.3, dy + 0.8, 1, 2.4); g.fillRect(x + w * 0.7 - 1, dy + 0.8, 1, 2.4);
     }
   }
-  // a container seen from above: roof ribs, a door end and a shadow
-  function box(g, x, y, w, h, color, horizontal, doorDown) {
-    g.fillStyle = 'rgba(0,0,0,0.18)'; g.fillRect(x + 2, y + 2, w, h);
-    g.fillStyle = color; g.fillRect(x, y, w, h);
-    g.strokeStyle = 'rgba(0,0,0,0.16)'; g.lineWidth = 1;
-    g.beginPath();
-    if (horizontal) for (let i = x + 3; i < x + w - 1; i += 4) { g.moveTo(i + 0.5, y + 1); g.lineTo(i + 0.5, y + h - 1); }
-    else for (let i = y + 3; i < y + h - 1; i += 4) { g.moveTo(x + 1, i + 0.5); g.lineTo(x + w - 1, i + 0.5); }
-    g.stroke();
-    g.fillStyle = 'rgba(255,255,255,0.12)'; g.fillRect(x, y, horizontal ? w : 2, horizontal ? 2 : h);
-    if (!horizontal) { g.fillStyle = 'rgba(0,0,0,0.32)'; g.fillRect(x, doorDown ? y + h - 3 : y, w, 3); }
+  // a colour lighter or darker
+  function shade(hexCol, k) {
+    const c = hexCol.replace('#', ''), n = parseInt(c.length === 3 ? c.split('').map((x) => x + x).join('') : c, 16);
+    let r = (n >> 16) & 255, gg = (n >> 8) & 255, b = n & 255;
+    const f = (v) => Math.max(0, Math.min(255, Math.round(k < 0 ? v * (1 + k) : v + (255 - v) * k)));
+    r = f(r); gg = f(gg); b = f(b);
+    return `rgb(${r},${gg},${b})`;
   }
 
   // ───────────────────────── where people are ─────────────────────────
@@ -296,26 +357,72 @@
       g.fillText(`PROTEST · ${protesting.length}`, L.stage.x, L.stage.y + 50);
     }
     const sel = v.opts.selected;
+    // (V6) people as little figures seen from above: a shadow, shoulders in their colour, a head
+    const SKIN = ['#f1c9a5', '#e0ac85', '#c68b62', '#9a6646', '#6e4630', '#f3d6bd'];
     for (const x of pos) {
       if (!x.vis) continue;
       const c = x.c;
-      const r = c.isPlayer ? 4.6 : c.age < 16 ? 2.6 : 3.4;
+      const r = (c.isPlayer ? 4.6 : c.age < 16 ? 2.7 : 3.5) * (L.compact ? 1 : 1.3);
       let fill = dotColor(v, c, TRADE);
-      if (x.act === 'naked' && !x.walking) fill = '#e7b593';
-      g.beginPath(); g.arc(x.x, x.y, r, 0, Math.PI * 2);
-      g.fillStyle = fill; g.fill();
-      g.lineWidth = c.isPlayer ? 2 : 1;
-      g.strokeStyle = c.status === 'detained' ? v.colors.warn : x.act === 'uniform' ? '#2f5d8a' : c.isPlayer ? v.colors.accent : 'rgba(0,0,0,0.45)';
+      const naked = x.act === 'naked' && !x.walking;
+      const skin = SKIN[Math.floor(hash(c.id * 41 + 3) * SKIN.length)];
+      if (naked) fill = skin;
+      // a walking bob
+      const bob = x.walking ? Math.sin(p * 900 + c.id) * 0.6 : 0;
+      g.fillStyle = 'rgba(0,0,0,0.4)'; g.beginPath(); g.ellipse(x.x + 1.8, x.y + 2.2, r * 1.05, r * 0.7, 0, 0, Math.PI * 2); g.fill();
+      g.fillStyle = fill; g.beginPath(); g.ellipse(x.x, x.y + bob, r * 1.12, r * 0.82, 0, 0, Math.PI * 2); g.fill();
+      g.lineWidth = c.isPlayer ? 1.6 : 0.8;
+      g.strokeStyle = c.status === 'detained' ? v.colors.warn : x.act === 'uniform' ? '#2f5d8a' : 'rgba(0,0,0,0.55)';
       if (x.act === 'uniform') g.lineWidth = 2;
       g.stroke();
-      if (x.act === 'protest' && !x.walking) { g.strokeStyle = v.colors.bad; g.lineWidth = 1; g.beginPath(); g.moveTo(x.x + 2, x.y - 2); g.lineTo(x.x + 2, x.y - 9); g.stroke(); g.fillStyle = v.colors.bad; g.fillRect(x.x + 2, x.y - 10, 5, 3); }
-      if (x.act === 'weapon' && !x.walking) { g.fillStyle = v.colors.bad; g.fillRect(x.x + 3, x.y - 1, 3, 1.5); }
-      if (sel === c.id || (v.hover && v.hover.c === c)) { g.strokeStyle = v.colors.ink; g.lineWidth = 1.5; g.beginPath(); g.arc(x.x, x.y, r + 3.5, 0, Math.PI * 2); g.stroke(); }
+      g.fillStyle = skin; g.beginPath(); g.arc(x.x, x.y - r * 0.15 + bob, r * 0.58, 0, Math.PI * 2); g.fill();
+      g.strokeStyle = 'rgba(0,0,0,0.35)'; g.lineWidth = 0.6; g.stroke();
+      if (c.isPlayer) {
+        // you: a yellow ring and a little marker above
+        g.strokeStyle = '#f2b632'; g.lineWidth = 1.6; g.beginPath(); g.arc(x.x, x.y, r + 3, 0, Math.PI * 2); g.stroke();
+        g.fillStyle = '#f2b632'; g.beginPath(); g.moveTo(x.x, x.y - r - 4); g.lineTo(x.x - 3.5, x.y - r - 9.5); g.lineTo(x.x + 3.5, x.y - r - 9.5); g.closePath(); g.fill();
+      }
+      if (x.act === 'protest' && !x.walking) { g.strokeStyle = '#ddd'; g.lineWidth = 1; g.beginPath(); g.moveTo(x.x + 3, x.y - 1); g.lineTo(x.x + 3, x.y - 10); g.stroke(); g.fillStyle = v.colors.bad; g.fillRect(x.x + 3, x.y - 11, 6, 4); }
+      if (x.act === 'weapon' && !x.walking) { g.fillStyle = '#1b1b1b'; g.fillRect(x.x + 3, x.y - 1, 4, 1.6); }
+      if (sel === c.id || (v.hover && v.hover.c === c)) { g.strokeStyle = '#ffffff'; g.lineWidth = 1.5; g.setLineDash([3, 2]); g.beginPath(); g.arc(x.x, x.y, r + 4.5, 0, Math.PI * 2); g.stroke(); g.setLineDash([]); }
     }
+    // night: the yard goes dark except where the light is - lamp posts, lit windows, string lights over the plaza
     if (night > 0) {
-      g.fillStyle = `rgba(8, 16, 34, ${0.42 * night})`; g.fillRect(0, 0, L.W, L.H);
-      g.fillStyle = `rgba(255, 210, 120, ${0.85 * night})`;
-      for (const it of L.items) if (it.type === 'home' || it.type === 'villa' || (it.type === 'bar' && p > 0.82 && p < 0.97)) { const wy = it.top ? it.y + it.h - 8 : it.y + 5; g.fillRect(it.x + it.w / 2 - 2, wy, 4, 3); }
+      const nc = v.night || (v.night = document.createElement('canvas'));
+      if (nc.width !== v.cv.width || nc.height !== v.cv.height) { nc.width = v.cv.width; nc.height = v.cv.height; }
+      const n = nc.getContext('2d');
+      n.setTransform(v.dpr, 0, 0, v.dpr, 0, 0);
+      n.globalCompositeOperation = 'source-over'; n.clearRect(0, 0, L.W, L.H);
+      n.fillStyle = `rgba(6, 12, 30, ${0.62 * night})`; n.fillRect(0, 0, L.W, L.H);
+      n.globalCompositeOperation = 'destination-out';
+      const hole = (hx, hy, rad, a) => { const gr = n.createRadialGradient(hx, hy, 0, hx, hy, rad); gr.addColorStop(0, `rgba(0,0,0,${a})`); gr.addColorStop(1, 'rgba(0,0,0,0)'); n.fillStyle = gr; n.fillRect(hx - rad, hy - rad, rad * 2, rad * 2); };
+      for (const lp of L.lamps || []) hole(lp.x, lp.y, 42, 0.85);
+      const lit = L.items.filter((it) => it.type === 'home' || it.type === 'villa' || (it.type === 'bar' && p > 0.82 && p < 0.97));
+      for (const it of lit) hole(it.x + it.w / 2, it.door.y, 16, 0.7);
+      n.globalCompositeOperation = 'source-over';
+      g.setTransform(1, 0, 0, 1, 0, 0); g.drawImage(nc, 0, 0); g.setTransform(v.dpr, 0, 0, v.dpr, 0, 0);
+      // warm light from the lamps and the windows
+      g.globalCompositeOperation = 'lighter';
+      for (const lp of L.lamps || []) { const gr = g.createRadialGradient(lp.x, lp.y, 0, lp.x, lp.y, 34); gr.addColorStop(0, `rgba(255,200,120,${0.35 * night})`); gr.addColorStop(1, 'rgba(255,200,120,0)'); g.fillStyle = gr; g.fillRect(lp.x - 34, lp.y - 34, 68, 68); }
+      for (const it of lit) { const wy = it.top ? it.y + it.h - 8 : it.y + 5; g.fillStyle = `rgba(255, 205, 120, ${0.9 * night})`; g.fillRect(it.x + it.w / 2 - 2, wy, 4, 3); const gr = g.createRadialGradient(it.x + it.w / 2, it.door.y, 0, it.x + it.w / 2, it.door.y, 12); gr.addColorStop(0, `rgba(255,190,100,${0.3 * night})`); gr.addColorStop(1, 'rgba(255,190,100,0)'); g.fillStyle = gr; g.fillRect(it.x + it.w / 2 - 12, it.door.y - 12, 24, 24); }
+      // string lights across the plaza, swaying a little
+      const P = L.plaza;
+      for (let k = 0; k < 3; k++) {
+        const y0 = P.y + P.h * (0.25 + k * 0.25), sag = 7 + k * 2, sway = Math.sin(p * 40 + k) * 1.2;
+        // the wire they hang from
+        g.globalCompositeOperation = 'source-over';
+        g.strokeStyle = `rgba(20,20,20,${0.6 * night})`; g.lineWidth = 0.8; g.beginPath();
+        for (let i = 0; i <= 36; i++) { const t = i / 36, bx = P.x + 8 + (P.w - 16) * t, by = y0 + Math.sin(t * Math.PI) * sag + sway * Math.sin(t * Math.PI) - 1.5; if (i) g.lineTo(bx, by); else g.moveTo(bx, by); }
+        g.stroke();
+        g.globalCompositeOperation = 'lighter';
+        for (let i = 0; i <= 18; i++) {
+          const t = i / 18, bx = P.x + 8 + (P.w - 16) * t, by = y0 + Math.sin(t * Math.PI) * sag + sway * Math.sin(t * Math.PI);
+          const col = ['255,90,70', '255,210,90', '120,200,255', '140,255,150'][(i + k) % 4];
+          g.fillStyle = `rgba(${col},${0.95 * night})`; g.beginPath(); g.arc(bx, by, 1.4, 0, Math.PI * 2); g.fill();
+          const gr = g.createRadialGradient(bx, by, 0, bx, by, 6); gr.addColorStop(0, `rgba(${col},${0.35 * night})`); gr.addColorStop(1, `rgba(${col},0)`); g.fillStyle = gr; g.fillRect(bx - 6, by - 6, 12, 12);
+        }
+      }
+      g.globalCompositeOperation = 'source-over';
     }
     v.pos = pos;
     // the clock
@@ -338,7 +445,7 @@
 
   // ───────────────────────── interaction ─────────────────────────
   function hitTest(v, mx, my) {
-    let best = null, bd = 10;
+    let best = null, bd = v.L.compact ? 10 : 12;
     for (const x of v.pos || []) { if (!x.vis) continue; const d = Math.hypot(x.x - mx, x.y - my); if (d < bd) { bd = d; best = x; } }
     if (best) return { person: best };
     for (const it of v.L.items) if (mx >= it.x && mx <= it.x + it.w && my >= it.y && my <= it.y + it.h) return { item: it };
@@ -405,6 +512,8 @@
     setPaused(on) { if (on && !paused) { pausedAt = performance.now(); paused = true; } else if (!on && paused) { offset += performance.now() - pausedAt; paused = false; } },
     get paused() { return paused; },
     setColorBy(k) { colorBy = k; },
+    // jump the replayed day to a moment (0 = dawn, 1 = night): for the screenshots and tests
+    setTime(pp) { const base = (paused ? pausedAt : performance.now()) - T0; offset = base - pp * LOOP; },
     get colorBy() { return colorBy; },
     // where everyone is at this moment, for a text summary under the map
     census() {
