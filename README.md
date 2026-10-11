@@ -2,7 +2,7 @@
 
 A society sim by GooseKnightGaming. A yard of shipping containers has broken away from the country to run itself. Write its laws, live with its people, and keep hold of power, or take it.
 
-Current version: **V5**. Plain HTML, CSS and JavaScript. No libraries, no build step.
+Current version: **V6**. Plain HTML, CSS and JavaScript. No libraries, no build step.
 
 ## Play locally
 Open `index.html` in a browser.
@@ -86,6 +86,16 @@ Executed, exiled, assassinated, overthrown, taken back by the outside world, col
 Join, leave, found or challenge for the leadership of a party. If you lead one, you can disband it. You can try to outlaw a rival party, unless it's the ruling party, holds a council majority, or counts most adults as members: as ruler you can simply decree it; in a democracy it goes to a vote. An outlawed party can't stand for election, its members bleed away, and party work is punished by whatever you chose. Harsh rulers will do the same to their rivals, possibly yours. The Politics tab has a full table of where every party, you and the public stand on every issue.
 
 ## Changelog
+**V6: the look-and-feel pass** (the game itself is unchanged; saves carry over)
+- A dockyard look throughout: the header is a container's corrugated side, painted steel with the name stencilled on and a hazard stripe beneath; the gauges are safety-yellow; tabs are stencilled placards; the page underfoot is yard concrete.
+- The day's report is a notice pinned up with tape; decisions carry a red NOTICE tag, citizens' proposals a blue PETITION tag; panels are sheets of paper with stencilled headings; laws read back like typed statutes.
+- Buttons look painted on and press in; action costs sit on a yellow tag.
+- Citizens' cards have proper container doors, bars and all.
+- The yard map is redrawn as a place: asphalt with grain, cracks and oil stains, a road with a dashed line, painted walkways, a concrete plaza in slabs with the commune's name painted on, a timber stage, the standpipe and its puddle, lamp posts, a chain-link fence (or a concrete wall once it is built).
+- Containers have depth: a shadow, a shaded side, roof ribs, rust and wear, and the door end with its locking bars; names are stencilled on.
+- People are little figures seen from above (shoulders in their colour, a head, a shadow), bigger on the full map; you are marked in yellow.
+- Night falls properly: the yard goes dark except under the lamp posts and the lit windows, and string lights come on over the plaza.
+
 **V5**
 - Invent punishments (beheading, incineration, thumbscrews, the stocks, amputation of a hand, a month in the pit…) and abolish any punishment or a whole kind. Amputations have lasting effects.
 - Tidier: Laws, Politics and Commune are split into sections; the tab bar stays at the top as you scroll; the law builder sits beside its preview and forecast; your platform is edited directly in the "Where they stand" table; on phones the meters are one swipeable row.

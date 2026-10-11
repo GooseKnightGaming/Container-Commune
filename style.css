@@ -360,3 +360,151 @@ td.pub { display: flex; align-items: center; gap: 8px; }
   .puncat li { grid-template-columns: minmax(0, 1fr) 46px auto; }
   .puncat li > .small { display: none; }
 }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   V6: the look-and-feel pass — a working dockyard.
+   Corrugated steel, corten rust, safety yellow and stencilled paint; the day's report
+   pinned up like a notice; buttons that look painted on and press in.
+   ══════════════════════════════════════════════════════════════════════════ */
+:root {
+  --bg: #d9d4ca;                 /* yard concrete, warm */
+  --surface: #f6f2e9;            /* paper */
+  --surface-2: #ece6da;
+  --ink: #1d2124;
+  --muted: #5e6467;
+  --line: #c3baa9;
+  --accent: #b9471f;             /* corten */
+  --accent-ink: #fff8ee;
+  --blue: #1f5a85;               /* container blue */
+  --good: #2c7a45;
+  --warn: #b0781a;
+  --bad: #b02a1f;
+  --chip: #ddd5c6;
+  --yellow: #f2b632;             /* safety yellow */
+  --steel: #2b3a46;              /* the header band */
+  --steel-2: #23303a;
+  --shadow: 0 1px 0 rgba(60, 40, 10, 0.08), 0 6px 18px -10px rgba(40, 25, 5, 0.35);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #14181b; --surface: #1d2226; --surface-2: #232a2f; --ink: #ebe5d9; --muted: #9ea6ab; --line: #343d43;
+    --accent: #e0683b; --accent-ink: #1a0b05; --blue: #6fa7d6; --good: #64c184; --warn: #e6ab4c; --bad: #ff7266; --chip: #2b3338;
+    --yellow: #f2b632; --steel: #1f2a33; --steel-2: #192229;
+    --shadow: 0 1px 0 rgba(0,0,0,0.3), 0 8px 22px -12px rgba(0,0,0,0.7);
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #14181b; --surface: #1d2226; --surface-2: #232a2f; --ink: #ebe5d9; --muted: #9ea6ab; --line: #343d43;
+  --accent: #e0683b; --accent-ink: #1a0b05; --blue: #6fa7d6; --good: #64c184; --warn: #e6ab4c; --bad: #ff7266; --chip: #2b3338;
+  --yellow: #f2b632; --steel: #1f2a33; --steel-2: #192229;
+  --shadow: 0 1px 0 rgba(0,0,0,0.3), 0 8px 22px -12px rgba(0,0,0,0.7);
+}
+/* the yard underfoot: concrete with a faint grain and expansion joints */
+body {
+  background-color: var(--bg);
+  background-image:
+    linear-gradient(90deg, rgba(0,0,0,0.035) 1px, transparent 1px),
+    linear-gradient(rgba(0,0,0,0.035) 1px, transparent 1px),
+    url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='180' height='180'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.75' numOctaves='3' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 0.09 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
+  background-size: 240px 240px, 240px 240px, 180px 180px;
+  padding-inline: 0;
+}
+.tabs, .layout, .foot { margin-inline: 16px; }
+
+/* the header: a container's corrugated side, painted, with the name stencilled on */
+.top {
+  position: relative;
+  padding: 16px 20px 14px;
+  border-bottom: 0;
+  color: #f3eee4;
+  background-color: var(--steel);
+  background-image:
+    repeating-linear-gradient(90deg, rgba(255,255,255,0.07) 0 6px, rgba(0,0,0,0.0) 6px 12px, rgba(0,0,0,0.18) 12px 18px, rgba(0,0,0,0) 18px 24px),
+    linear-gradient(180deg, rgba(255,255,255,0.06), rgba(0,0,0,0.25));
+  box-shadow: inset 0 3px 0 rgba(255,255,255,0.08), inset 0 -4px 0 rgba(0,0,0,0.35), 0 4px 0 var(--yellow), 0 4px 0 2px rgba(0,0,0,0.25);
+  margin-bottom: 4px;
+}
+.top::after {   /* hazard stripe under the band */
+  content: ""; position: absolute; left: 0; right: 0; bottom: -10px; height: 6px;
+  background: repeating-linear-gradient(-45deg, var(--yellow) 0 10px, #1d2124 10px 20px);
+  opacity: 0.9;
+}
+.brand h1 { color: #f6f0e4; text-shadow: 0 2px 0 rgba(0,0,0,0.35); letter-spacing: 0.04em; }
+.brand h1 span { color: #ff8a52; }
+.brand p { color: #b9c3ca; }
+.meter b { color: #a9b5bd; }
+.meter .v { color: #fbf5ea; }
+.meter .bar { background: rgba(255,255,255,0.12); height: 4px; border-radius: 2px; }
+.meter .bar i { background: var(--yellow); border-radius: 2px; }
+.meter.low .v { color: #ff8a7e; }
+.meter.low .bar i { background: #ff6a5a; }
+.meter.secret .v { color: #ffcb6b; }
+.ap { color: #b9c3ca; }
+.ap i { border-color: #d7dde1; }
+.ap i.on { background: var(--yellow); border-color: var(--yellow); box-shadow: 0 0 8px rgba(242,182,50,0.6); }
+.top .btn.primary { background: var(--yellow); border-color: #c48d14; color: #1d1a12; box-shadow: 0 3px 0 #8f650c; text-transform: uppercase; letter-spacing: 0.04em; font-family: var(--font-display); font-weight: 400; }
+.top .btn.primary:active { transform: translateY(2px); box-shadow: 0 1px 0 #8f650c; }
+
+/* tabs: stencilled placards */
+.tabs { margin-top: 18px; background: transparent; border-bottom: 2px solid var(--ink); gap: 4px; padding-top: 6px; }
+.tabs button { font-family: var(--font-display); font-weight: 400; letter-spacing: 0.06em; text-transform: uppercase; font-size: 14px; padding: 10px 14px 8px; border: 2px solid transparent; border-bottom: 0; border-radius: 4px 4px 0 0; color: var(--muted); }
+.tabs button:hover { color: var(--ink); background: color-mix(in srgb, var(--surface) 60%, transparent); }
+.tabs button[aria-selected="true"] { color: var(--accent-ink); background: var(--accent); border-color: var(--accent); box-shadow: inset 0 -3px 0 rgba(0,0,0,0.2); }
+@supports (backdrop-filter: blur(4px)) { .tabs { backdrop-filter: blur(6px); background: color-mix(in srgb, var(--bg) 82%, transparent); } }
+
+/* panels: a sheet of paper on a clipboard; section labels stencilled */
+.panel, .drawer { background: var(--surface); border: 1px solid var(--line); border-radius: 3px; box-shadow: var(--shadow); }
+.panel > h2, .sect { font-family: var(--font-display); font-weight: 400; font-size: 14px; letter-spacing: 0.08em; color: var(--ink); border-bottom: 2px solid var(--ink); padding-bottom: 7px; }
+.panel > h2 .r { font-family: var(--font-body); color: var(--muted); font-size: 12.5px; letter-spacing: 0; }
+.drawer h4 { font-family: var(--font-display); font-weight: 400; letter-spacing: 0.08em; font-size: 12.5px; color: var(--ink); }
+.who h3 { font-family: var(--font-display); font-weight: 400; letter-spacing: 0.03em; font-size: 24px; }
+
+/* the day's report: a notice pinned up with tape */
+.panel.report { position: relative; background: #fbf7ee; transform: rotate(-0.25deg); border-color: #d9cfbd; box-shadow: 0 2px 0 rgba(0,0,0,0.05), 0 14px 26px -16px rgba(40,25,5,0.5); }
+.panel.report::before, .panel.report::after {
+  content: ""; position: absolute; top: -9px; width: 74px; height: 20px;
+  background: rgba(240, 214, 150, 0.75); box-shadow: 0 1px 2px rgba(0,0,0,0.15);
+}
+.panel.report::before { left: 22px; transform: rotate(-4deg); }
+.panel.report::after { right: 22px; transform: rotate(5deg); }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .panel.report { background: #222a2f; border-color: #3a4449; } :root:not([data-theme="light"]) .panel.report::before, :root:not([data-theme="light"]) .panel.report::after { background: rgba(200, 170, 100, 0.35); } }
+:root[data-theme="dark"] .panel.report { background: #222a2f; border-color: #3a4449; }
+.dateline { font-size: 30px; letter-spacing: 0.02em; }
+.report h3 { font-family: var(--font-display); font-weight: 400; letter-spacing: 0.08em; color: var(--accent); font-size: 12.5px; }
+.report ul.headlines li { font-size: 15.5px; }
+.report ul li::marker { color: var(--accent); }
+
+/* buttons: painted on, and they press in */
+.btn { border: 1px solid color-mix(in srgb, var(--ink) 22%, var(--line)); background: var(--surface); border-radius: 3px; box-shadow: 0 2px 0 color-mix(in srgb, var(--ink) 18%, transparent); transition: transform 0.06s, box-shadow 0.06s, border-color 0.15s; }
+.btn:hover:not(:disabled) { border-color: var(--accent); }
+.btn:active:not(:disabled) { transform: translateY(2px); box-shadow: 0 0 0 transparent; }
+.btn.primary { background: var(--accent); border-color: color-mix(in srgb, var(--accent) 70%, #000); box-shadow: 0 3px 0 color-mix(in srgb, var(--accent) 55%, #000); }
+.btn .cost { background: color-mix(in srgb, var(--yellow) 35%, transparent); color: var(--ink); padding: 3px 5px; border-radius: 2px; opacity: 1; }
+.btn.primary .cost { background: rgba(0,0,0,0.18); color: inherit; }
+.quick .btn { min-height: 46px; }
+
+/* people: each citizen a little container end, doors and all */
+.box { border-radius: 2px; box-shadow: var(--shadow); }
+.box .doors { height: 26px; background-image: repeating-linear-gradient(90deg, rgba(255,255,255,0.18) 0 3px, rgba(0,0,0,0.14) 3px 8px), linear-gradient(180deg, rgba(255,255,255,0.12), rgba(0,0,0,0.2)); }
+.box .doors::before { content: ""; position: absolute; left: calc(50% - 10px); right: calc(50% - 10px); top: 9px; height: 3px; background: rgba(0,0,0,0.35); border-radius: 1px; }
+.box .nm { font-size: 15px; }
+
+/* the event and proposal cards: a red-tag notice */
+.event { border-width: 2px; border-radius: 3px; box-shadow: var(--shadow); background: color-mix(in srgb, var(--accent) 7%, var(--surface)); position: relative; }
+.event::before { content: "NOTICE"; position: absolute; top: -10px; left: 12px; font: 400 11px/1 var(--font-display); letter-spacing: 0.12em; background: var(--accent); color: var(--accent-ink); padding: 4px 8px 3px; border-radius: 2px; }
+.event.proposal::before { content: "PETITION"; background: var(--blue); color: #fff; }
+
+/* laws: the statute book as typed pages */
+.law { border-radius: 2px; background: var(--surface); box-shadow: 0 1px 0 rgba(0,0,0,0.06); border-left: 4px solid var(--blue); }
+.law.pending { border-left-color: var(--warn); }
+.lbfull { border-radius: 2px; background: var(--surface); box-shadow: inset 0 0 0 1px var(--line); font-family: Georgia, "Times New Roman", serif; font-size: 17px; }
+
+/* the overlay sheets (start, constitution): a dossier */
+.overlay { background: rgba(20, 24, 27, 0.72); backdrop-filter: blur(3px); }
+.sheet { border-radius: 4px; border-top: 6px solid var(--accent); box-shadow: 0 40px 90px rgba(0,0,0,0.5); }
+.start { border-radius: 3px; }
+
+/* the yard map frame */
+.yardwrap { border-radius: 3px; border: 3px solid #1d2124; box-shadow: var(--shadow); background: #2e3236; }
+.ytip { background: #14181b; color: #f3eee4; border-left: 3px solid var(--yellow); }
+.toast { border-left: 4px solid var(--yellow); }
